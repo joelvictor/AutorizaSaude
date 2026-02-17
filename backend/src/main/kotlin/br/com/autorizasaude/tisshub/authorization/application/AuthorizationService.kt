@@ -7,6 +7,7 @@ import br.com.autorizasaude.tisshub.authorization.infrastructure.IdempotencyRepo
 import br.com.autorizasaude.tisshub.authorization.infrastructure.OutboxEventRepository
 import br.com.autorizasaude.tisshub.operatordispatch.application.OperatorDispatchService
 import br.com.autorizasaude.tisshub.shared.events.DomainEvent
+import br.com.autorizasaude.tisshub.tissguide.application.TissGuideService
 import com.fasterxml.jackson.databind.ObjectMapper
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.transaction.Transactional
@@ -46,6 +47,7 @@ class AuthorizationService(
     private val idempotencyRepository: IdempotencyRepository,
     private val outboxEventRepository: OutboxEventRepository,
     private val operatorDispatchService: OperatorDispatchService,
+    private val tissGuideService: TissGuideService,
     private val objectMapper: ObjectMapper
 ) {
     @Transactional
@@ -134,6 +136,63 @@ class AuthorizationService(
                 payload = mapOf(
                     "authorizationId" to validated.authorizationId,
                     "validationSummary" to "business-rules-ok"
+                )
+            )
+        )
+
+        val tissResult = tissGuideService.generateAndValidate(validated)
+        if (!tissResult.valid) {
+            val failed = validated.copy(
+                status = AuthorizationStatus.FAILED_TECHNICAL,
+                updatedAt = OffsetDateTime.now()
+            )
+            authorizationRepository.updateStatus(failed)
+            outboxEventRepository.append(
+                aggregateType = "AUTHORIZATION",
+                aggregateId = failed.authorizationId,
+                event = DomainEvent(
+                    eventId = UUID.randomUUID(),
+                    eventType = "EVT-004",
+                    eventVersion = 1,
+                    occurredAt = failed.updatedAt,
+                    tenantId = failed.tenantId,
+                    correlationId = command.correlationId,
+                    payload = mapOf(
+                        "authorizationId" to failed.authorizationId,
+                        "tissGuideId" to tissResult.tissGuide.tissGuideId,
+                        "errors" to listOf(tissResult.tissGuide.validationReport ?: "unknown-validation-error")
+                    )
+                )
+            )
+            idempotencyRepository.linkAuthorization(
+                tenantId = command.tenantId,
+                idempotencyKey = command.idempotencyKey,
+                authorizationId = failed.authorizationId,
+                responseSnapshot = objectMapper.writeValueAsString(
+                    mapOf(
+                        "authorizationId" to failed.authorizationId,
+                        "status" to failed.status.name
+                    )
+                )
+            )
+            return CreateAuthorizationResult(failed, replayed = false)
+        }
+
+        outboxEventRepository.append(
+            aggregateType = "AUTHORIZATION",
+            aggregateId = validated.authorizationId,
+            event = DomainEvent(
+                eventId = UUID.randomUUID(),
+                eventType = "EVT-003",
+                eventVersion = 1,
+                occurredAt = OffsetDateTime.now(),
+                tenantId = validated.tenantId,
+                correlationId = command.correlationId,
+                payload = mapOf(
+                    "authorizationId" to validated.authorizationId,
+                    "tissGuideId" to tissResult.tissGuide.tissGuideId,
+                    "xmlHash" to tissResult.tissGuide.xmlHash,
+                    "tissVersion" to tissResult.tissGuide.tissVersion
                 )
             )
         )

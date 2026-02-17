@@ -34,14 +34,16 @@ create table if not exists authorization_procedures (
 create table if not exists tiss_guides (
   id bigserial primary key,
   tiss_guide_id uuid not null unique,
-  authorization_pk bigint not null references authorizations(id),
   tenant_id uuid not null,
+  authorization_id uuid not null,
   tiss_version text not null,
   xml_content text not null,
   xml_hash text not null,
   validation_status text not null,
-  validation_report jsonb,
-  created_at timestamptz not null default now()
+  validation_report text,
+  created_at timestamptz not null default now(),
+  constraint fk_tiss_guide_authorization
+    foreign key (tenant_id, authorization_id) references authorizations(tenant_id, authorization_id)
 );
 
 create table if not exists operator_dispatches (

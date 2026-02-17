@@ -60,6 +60,6 @@ Passos:
 ## Proximos Incrementos
 
 1. Implementar adaptadores reais por operadora (Tipo A/B/C) no `operator-dispatch`.
-2. Conectar `tiss-guide` com validacao XSD real.
+2. Expandir regras de validacao TISS por operadora e versao de layout.
 3. Integrar dashboard com API real e stream de eventos.
 4. Evoluir relay de outbox para publicacao em broker real (Kafka/Rabbit) e politicas avancadas de retry.

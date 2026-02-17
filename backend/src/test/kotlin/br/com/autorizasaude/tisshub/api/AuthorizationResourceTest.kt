@@ -4,6 +4,7 @@ import io.quarkus.test.junit.QuarkusTest
 import io.restassured.RestAssured.given
 import org.hamcrest.CoreMatchers.equalTo
 import org.hamcrest.CoreMatchers.notNullValue
+import org.hamcrest.CoreMatchers.nullValue
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
@@ -212,11 +213,47 @@ class AuthorizationResourceTest {
             .statusCode(200)
             .body("authorizationId", equalTo(authorizationId))
             .body("status", equalTo("DISPATCHED"))
-            .body("timeline.size()", equalTo(3))
+            .body("timeline.size()", equalTo(4))
             .body("timeline[0].eventType", equalTo("EVT-001"))
             .body("timeline[1].eventType", equalTo("EVT-002"))
-            .body("timeline[2].eventType", equalTo("EVT-005"))
+            .body("timeline[2].eventType", equalTo("EVT-003"))
+            .body("timeline[3].eventType", equalTo("EVT-005"))
             .body("dispatch.dispatchType", equalTo("TYPE_A"))
             .body("dispatch.technicalStatus", equalTo("READY"))
+    }
+
+    @Test
+    fun `should fail technical when tiss xml is invalid`() {
+        val tenantId = UUID.randomUUID().toString()
+        val authorizationId = given()
+            .header("X-Tenant-Id", tenantId)
+            .header("X-Correlation-Id", UUID.randomUUID().toString())
+            .header("X-Idempotency-Key", "idem-${UUID.randomUUID()}")
+            .contentType("application/json")
+            .body(
+                """
+                {
+                  "patientId": "P-007",
+                  "operatorCode": "OPERADORA INVALIDA",
+                  "procedureCodes": ["66666666"],
+                  "clinicalJustification": "Deve falhar no XSD"
+                }
+                """.trimIndent()
+            )
+            .`when`().post("/v1/authorizations")
+            .then()
+            .statusCode(201)
+            .body("status", equalTo("FAILED_TECHNICAL"))
+            .extract()
+            .path<String>("authorizationId")
+
+        given()
+            .header("X-Tenant-Id", tenantId)
+            .`when`().get("/v1/authorizations/$authorizationId/status")
+            .then()
+            .statusCode(200)
+            .body("status", equalTo("FAILED_TECHNICAL"))
+            .body("timeline[2].eventType", equalTo("EVT-004"))
+            .body("dispatch", nullValue())
     }
 }
