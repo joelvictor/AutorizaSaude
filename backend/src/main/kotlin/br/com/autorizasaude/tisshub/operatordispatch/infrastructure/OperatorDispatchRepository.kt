@@ -62,6 +62,26 @@ class OperatorDispatchRepository(
         }
     }
 
+    fun update(dispatch: OperatorDispatch) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                update operator_dispatches
+                set technical_status = ?, attempt_count = ?, external_protocol = ?, updated_at = ?
+                where dispatch_id = ? and tenant_id = ?
+                """.trimIndent()
+            ).use { statement ->
+                statement.setString(1, dispatch.technicalStatus.name)
+                statement.setInt(2, dispatch.attemptCount)
+                statement.setString(3, dispatch.externalProtocol)
+                statement.setObject(4, dispatch.updatedAt)
+                statement.setObject(5, dispatch.dispatchId)
+                statement.setObject(6, dispatch.tenantId)
+                statement.executeUpdate()
+            }
+        }
+    }
+
     private fun ResultSet.toDispatch(): OperatorDispatch = OperatorDispatch(
         dispatchId = getObject("dispatch_id", UUID::class.java),
         tenantId = getObject("tenant_id", UUID::class.java),

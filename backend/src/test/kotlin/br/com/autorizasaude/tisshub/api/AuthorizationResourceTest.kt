@@ -213,13 +213,15 @@ class AuthorizationResourceTest {
             .statusCode(200)
             .body("authorizationId", equalTo(authorizationId))
             .body("status", equalTo("DISPATCHED"))
-            .body("timeline.size()", equalTo(4))
+            .body("timeline.size()", equalTo(6))
             .body("timeline[0].eventType", equalTo("EVT-001"))
             .body("timeline[1].eventType", equalTo("EVT-002"))
             .body("timeline[2].eventType", equalTo("EVT-003"))
             .body("timeline[3].eventType", equalTo("EVT-005"))
+            .body("timeline[4].eventType", equalTo("EVT-006"))
+            .body("timeline[5].eventType", equalTo("EVT-007"))
             .body("dispatch.dispatchType", equalTo("TYPE_A"))
-            .body("dispatch.technicalStatus", equalTo("READY"))
+            .body("dispatch.technicalStatus", equalTo("ACK_RECEIVED"))
     }
 
     @Test
@@ -255,5 +257,39 @@ class AuthorizationResourceTest {
             .body("status", equalTo("FAILED_TECHNICAL"))
             .body("timeline[2].eventType", equalTo("EVT-004"))
             .body("dispatch", nullValue())
+    }
+
+    @Test
+    fun `should use type b adapter and stay in polling`() {
+        val tenantId = UUID.randomUUID().toString()
+        val authorizationId = given()
+            .header("X-Tenant-Id", tenantId)
+            .header("X-Correlation-Id", UUID.randomUUID().toString())
+            .header("X-Idempotency-Key", "idem-${UUID.randomUUID()}")
+            .contentType("application/json")
+            .body(
+                """
+                {
+                  "patientId": "P-008",
+                  "operatorCode": "UNIMED",
+                  "procedureCodes": ["77777777"],
+                  "clinicalJustification": "Fluxo tipo B"
+                }
+                """.trimIndent()
+            )
+            .`when`().post("/v1/authorizations")
+            .then()
+            .statusCode(201)
+            .body("status", equalTo("DISPATCHED"))
+            .extract()
+            .path<String>("authorizationId")
+
+        given()
+            .header("X-Tenant-Id", tenantId)
+            .`when`().get("/v1/authorizations/$authorizationId/status")
+            .then()
+            .statusCode(200)
+            .body("dispatch.dispatchType", equalTo("TYPE_B"))
+            .body("dispatch.technicalStatus", equalTo("POLLING"))
     }
 }
