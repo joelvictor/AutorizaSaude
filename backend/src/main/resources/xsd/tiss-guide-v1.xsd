@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:simpleType name="UuidType">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="OperatorCodeType">
+    <xs:restriction base="xs:string">
+      <xs:minLength value="2"/>
+      <xs:maxLength value="30"/>
+      <xs:pattern value="[A-Z0-9_]+"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="ProcedureCodeType">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[0-9]{8}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:element name="tissGuide">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="authorizationId" type="UuidType"/>
+        <xs:element name="tenantId" type="UuidType"/>
+        <xs:element name="operatorCode" type="OperatorCodeType"/>
+        <xs:element name="patientId" type="xs:string"/>
+        <xs:element name="clinicalJustification">
+          <xs:simpleType>
+            <xs:restriction base="xs:string">
+              <xs:minLength value="3"/>
+            </xs:restriction>
+          </xs:simpleType>
+        </xs:element>
+        <xs:element name="procedures">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="procedure" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:attribute name="code" type="ProcedureCodeType" use="required"/>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+      <xs:attribute name="version" type="xs:string" use="required"/>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

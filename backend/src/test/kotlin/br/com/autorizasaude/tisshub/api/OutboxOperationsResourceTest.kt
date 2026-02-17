@@ -47,14 +47,14 @@ class OutboxOperationsResourceTest {
             .`when`().get("/v1/operations/outbox")
             .then()
             .statusCode(200)
-            .body("pending", equalTo(3))
+            .body("pending", equalTo(4))
 
         given()
             .`when`().post("/v1/operations/outbox/process")
             .then()
             .statusCode(200)
-            .body("scanned", equalTo(3))
-            .body("published", equalTo(3))
+            .body("scanned", equalTo(4))
+            .body("published", equalTo(4))
             .body("failed", equalTo(0))
             .body("deadLettered", equalTo(0))
 
@@ -63,6 +63,6 @@ class OutboxOperationsResourceTest {
             .then()
             .statusCode(200)
             .body("pending", equalTo(0))
-            .body("published", greaterThanOrEqualTo(3))
+            .body("published", greaterThanOrEqualTo(4))
     }
 }
