@@ -36,6 +36,7 @@ Endpoints iniciais:
 - `GET /v1/authorizations/{authorizationId}`
 - `GET /v1/authorizations/{authorizationId}/status`
 - `POST /v1/authorizations/{authorizationId}/cancel`
+- `POST /v1/authorizations/{authorizationId}/poll`
 - `GET /v1/operations/outbox`
 - `POST /v1/operations/outbox/process`
 

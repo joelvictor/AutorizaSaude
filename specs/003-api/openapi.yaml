@@ -93,6 +93,23 @@ paths:
           description: Cancelada
         '409':
           description: Estado nao permite cancelamento
+  /v1/authorizations/{authorizationId}/poll:
+    post:
+      summary: Executar polling de status na operadora
+      operationId: pollAuthorizationStatus
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/AuthorizationIdPath'
+        - $ref: '#/components/parameters/CorrelationHeader'
+      responses:
+        '200':
+          description: Status atualizado apos polling
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationResponse'
+        '404':
+          description: Nao encontrada
   /v1/operations/outbox:
     get:
       summary: Consultar estatisticas do outbox
