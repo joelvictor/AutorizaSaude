@@ -95,7 +95,6 @@ create table if not exists idempotency_keys (
 
 create table if not exists audit_trail (
   id bigserial primary key,
-  audit_id uuid not null unique,
   tenant_id uuid not null,
   aggregate_type text not null,
   aggregate_id uuid not null,

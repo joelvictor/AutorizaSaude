@@ -20,6 +20,6 @@
 
 ## Shared Kernel
 
-- Tipos de identificador (`TenantId`, `AuthorizationId`, `CorrelationId`)
+- Tipos de identificador e correlacao (`tenantId`, `authorizationId`, `correlationId`)
 - Envelope de eventos
 - Erros de dominio padronizados
