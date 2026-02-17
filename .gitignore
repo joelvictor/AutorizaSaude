@@ -1,0 +1,10 @@
+.DS_Store
+.idea/
+
+# Backend
+/backend/.gradle/
+/backend/build/
+
+# Frontend
+/frontend/.next/
+/frontend/node_modules/

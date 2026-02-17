@@ -1,0 +1,212 @@
+openapi: 3.1.0
+info:
+  title: TISS Hub API
+  version: 1.0.0
+  description: API REST para ciclo de autorizacoes multi-tenant.
+servers:
+  - url: https://api.tisshub.local
+paths:
+  /v1/authorizations:
+    post:
+      summary: Criar autorizacao
+      operationId: createAuthorization
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/CorrelationHeader'
+        - $ref: '#/components/parameters/IdempotencyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAuthorizationRequest'
+      responses:
+        '201':
+          description: Criada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationResponse'
+        '409':
+          description: Conflito de idempotencia
+        '422':
+          description: Erro de validacao
+  /v1/authorizations/{authorizationId}:
+    get:
+      summary: Consultar autorizacao
+      operationId: getAuthorizationById
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/AuthorizationIdPath'
+      responses:
+        '200':
+          description: Encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationResponse'
+        '404':
+          description: Nao encontrada
+  /v1/authorizations/{authorizationId}/status:
+    get:
+      summary: Consultar status consolidado
+      operationId: getAuthorizationStatus
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/AuthorizationIdPath'
+      responses:
+        '200':
+          description: Status atual
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationStatusResponse'
+  /v1/authorizations/{authorizationId}/cancel:
+    post:
+      summary: Cancelar autorizacao
+      operationId: cancelAuthorization
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/AuthorizationIdPath'
+        - $ref: '#/components/parameters/CorrelationHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '202':
+          description: Cancelamento aceito
+        '409':
+          description: Estado nao permite cancelamento
+components:
+  parameters:
+    TenantHeader:
+      in: header
+      name: X-Tenant-Id
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CorrelationHeader:
+      in: header
+      name: X-Correlation-Id
+      required: true
+      schema:
+        type: string
+        format: uuid
+    IdempotencyHeader:
+      in: header
+      name: X-Idempotency-Key
+      required: true
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 128
+    AuthorizationIdPath:
+      in: path
+      name: authorizationId
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    CreateAuthorizationRequest:
+      type: object
+      required:
+        - patientId
+        - operatorCode
+        - procedureCodes
+        - clinicalJustification
+      properties:
+        patientId:
+          type: string
+        operatorCode:
+          type: string
+        procedureCodes:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        clinicalJustification:
+          type: string
+        attachments:
+          type: array
+          items:
+            type: object
+            required: [name, url]
+            properties:
+              name:
+                type: string
+              url:
+                type: string
+                format: uri
+    AuthorizationResponse:
+      type: object
+      required:
+        - authorizationId
+        - tenantId
+        - status
+        - operatorCode
+        - createdAt
+      properties:
+        authorizationId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+            - DRAFT
+            - VALIDATED
+            - DISPATCHED
+            - PENDING_OPERATOR
+            - AUTHORIZED
+            - DENIED
+            - CANCELLED
+            - EXPIRED
+            - FAILED_TECHNICAL
+        operatorCode:
+          type: string
+        operatorProtocol:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    AuthorizationStatusResponse:
+      type: object
+      required:
+        - authorizationId
+        - status
+        - timeline
+      properties:
+        authorizationId:
+          type: string
+          format: uuid
+        status:
+          type: string
+        timeline:
+          type: array
+          items:
+            type: object
+            required: [at, eventType]
+            properties:
+              at:
+                type: string
+                format: date-time
+              eventType:
+                type: string
+              detail:
+                type: string

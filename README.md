@@ -1,1 +1,62 @@
-# AutorizaSaude
+# AutorizaSaude - TISS Hub
+
+Plataforma de integracao generica para autorizacoes medicas com operadoras de saude, baseada em `Spec-Driven Development (SDD)`, `Modular Monolith` e `EDA interna`.
+
+## Estrutura
+
+- `/specs`: contratos oficiais da Fase 1
+  - `000-foundations`: arquitetura e mapa de modulos
+  - `001-domain`: aggregates e invariantes
+  - `002-events`: envelope e catalogo `EVT-001`..`EVT-016`
+  - `003-api`: OpenAPI 3.1 (`/v1`)
+  - `004-data`: schema PostgreSQL e mapeamento evento->persistencia
+  - `005-ports`: portas e contratos internos entre modulos
+  - `006-resilience`: event bus interno, retry, circuit breaker e DLQ
+  - `007-acceptance`: criterios de aceite executaveis
+- `/backend`: scaffold Kotlin + Quarkus para API e dominio inicial de autorizacoes
+- `/frontend`: scaffold Next.js para dashboard operacional inicial
+
+## Backend
+
+Requisitos:
+
+- JDK 25
+- Gradle 9.2+
+- PostgreSQL 15+
+
+Passos:
+
+1. `cd backend`
+2. Configure `src/main/resources/application.properties` para seu banco local.
+3. `./gradlew quarkusDev`
+
+Endpoints iniciais:
+
+- `POST /v1/authorizations`
+- `GET /v1/authorizations/{authorizationId}`
+- `POST /v1/authorizations/{authorizationId}/cancel`
+
+## Frontend
+
+Requisitos:
+
+- Node.js 22+
+
+Passos:
+
+1. `cd frontend`
+2. `npm install`
+3. `npm run dev`
+
+## Decisoes da Fase 1
+
+- Multi-tenant por `X-Tenant-Id` e `tenant_id` em persistencia/eventos.
+- Consistencia forte intra-aggregate e eventual inter-modulos.
+- Outbox e idempotencia como obrigatorios de plataforma.
+
+## Proximos Incrementos
+
+1. Implementar adapters por operadora (Tipo A/B/C) em `operator-dispatch`.
+2. Conectar `tiss-guide` com validacao XSD real.
+3. Substituir store em memoria por repositorio PostgreSQL.
+4. Integrar dashboard com API real e stream de eventos.
