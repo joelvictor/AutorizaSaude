@@ -36,6 +36,8 @@ Endpoints iniciais:
 - `GET /v1/authorizations/{authorizationId}`
 - `GET /v1/authorizations/{authorizationId}/status`
 - `POST /v1/authorizations/{authorizationId}/cancel`
+- `GET /v1/operations/outbox`
+- `POST /v1/operations/outbox/process`
 
 ## Frontend
 
@@ -60,4 +62,4 @@ Passos:
 1. Implementar adaptadores reais por operadora (Tipo A/B/C) no `operator-dispatch`.
 2. Conectar `tiss-guide` com validacao XSD real.
 3. Integrar dashboard com API real e stream de eventos.
-4. Adicionar worker de publicacao de outbox e reprocessamento de DLQ.
+4. Evoluir relay de outbox para publicacao em broker real (Kafka/Rabbit) e politicas avancadas de retry.

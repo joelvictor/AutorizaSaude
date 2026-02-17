@@ -77,12 +77,28 @@ create table if not exists outbox_events (
   payload jsonb not null,
   occurred_at timestamptz not null,
   published_at timestamptz,
-  publish_attempts integer not null default 0
+  publish_attempts integer not null default 0,
+  last_error text,
+  dead_letter_at timestamptz
 );
 
 create index if not exists idx_outbox_unpublished
   on outbox_events (published_at, occurred_at)
   where published_at is null;
+
+create index if not exists idx_outbox_pending
+  on outbox_events (occurred_at, published_at, dead_letter_at);
+
+create table if not exists outbox_dead_letters (
+  id bigserial primary key,
+  outbox_event_id bigint not null unique references outbox_events(id),
+  event_id uuid not null,
+  tenant_id uuid not null,
+  event_type text not null,
+  payload jsonb not null,
+  failure_reason text not null,
+  failed_at timestamptz not null default now()
+);
 
 create table if not exists idempotency_keys (
   id bigserial primary key,

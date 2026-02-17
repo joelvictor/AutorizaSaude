@@ -93,6 +93,28 @@ paths:
           description: Cancelada
         '409':
           description: Estado nao permite cancelamento
+  /v1/operations/outbox:
+    get:
+      summary: Consultar estatisticas do outbox
+      operationId: getOutboxStats
+      responses:
+        '200':
+          description: Estatisticas atuais do outbox
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxStatsResponse'
+  /v1/operations/outbox/process:
+    post:
+      summary: Processar lote de eventos pendentes no outbox
+      operationId: processOutbox
+      responses:
+        '200':
+          description: Resultado do processamento em lote
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxProcessResponse'
 components:
   parameters:
     TenantHeader:
@@ -239,3 +261,25 @@ components:
             externalProtocol:
               type: string
               nullable: true
+    OutboxStatsResponse:
+      type: object
+      required: [pending, published, deadLetter]
+      properties:
+        pending:
+          type: integer
+        published:
+          type: integer
+        deadLetter:
+          type: integer
+    OutboxProcessResponse:
+      type: object
+      required: [scanned, published, failed, deadLettered]
+      properties:
+        scanned:
+          type: integer
+        published:
+          type: integer
+        failed:
+          type: integer
+        deadLettered:
+          type: integer
