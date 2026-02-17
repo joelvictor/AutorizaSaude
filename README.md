@@ -59,7 +59,7 @@ Passos:
 
 ## Proximos Incrementos
 
-1. Implementar adaptadores reais por operadora (Tipo A/B/C) no `operator-dispatch`.
+1. Integrar adaptadores reais por operadora (Tipo A/B/C) com endpoints externos (SOAP/REST/portal).
 2. Expandir regras de validacao TISS por operadora e versao de layout.
 3. Integrar dashboard com API real e stream de eventos.
 4. Evoluir relay de outbox para publicacao em broker real (Kafka/Rabbit) e politicas avancadas de retry.

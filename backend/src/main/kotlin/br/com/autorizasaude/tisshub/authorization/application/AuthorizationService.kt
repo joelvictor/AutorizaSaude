@@ -6,6 +6,7 @@ import br.com.autorizasaude.tisshub.authorization.infrastructure.AuthorizationRe
 import br.com.autorizasaude.tisshub.authorization.infrastructure.IdempotencyRepository
 import br.com.autorizasaude.tisshub.authorization.infrastructure.OutboxEventRepository
 import br.com.autorizasaude.tisshub.operatordispatch.application.OperatorDispatchService
+import br.com.autorizasaude.tisshub.operatordispatch.domain.TechnicalStatus
 import br.com.autorizasaude.tisshub.shared.events.DomainEvent
 import br.com.autorizasaude.tisshub.tissguide.application.TissGuideService
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -198,30 +199,107 @@ class AuthorizationService(
         )
 
         val dispatch = operatorDispatchService.requestDispatch(validated)
+        outboxEventRepository.append(
+            aggregateType = "AUTHORIZATION",
+            aggregateId = validated.authorizationId,
+            event = DomainEvent(
+                eventId = UUID.randomUUID(),
+                eventType = "EVT-005",
+                eventVersion = 1,
+                occurredAt = dispatch.createdAt,
+                tenantId = validated.tenantId,
+                correlationId = command.correlationId,
+                payload = mapOf(
+                    "authorizationId" to validated.authorizationId,
+                    "operatorCode" to validated.operatorCode,
+                    "dispatchType" to dispatch.dispatchType.name
+                )
+            )
+        )
+
+        if (dispatch.technicalStatus == TechnicalStatus.TECHNICAL_ERROR) {
+            val failed = validated.copy(
+                status = AuthorizationStatus.FAILED_TECHNICAL,
+                updatedAt = OffsetDateTime.now()
+            )
+            authorizationRepository.updateStatus(failed)
+            outboxEventRepository.append(
+                aggregateType = "AUTHORIZATION",
+                aggregateId = failed.authorizationId,
+                event = DomainEvent(
+                    eventId = UUID.randomUUID(),
+                    eventType = "EVT-013",
+                    eventVersion = 1,
+                    occurredAt = failed.updatedAt,
+                    tenantId = failed.tenantId,
+                    correlationId = command.correlationId,
+                    payload = mapOf(
+                        "authorizationId" to failed.authorizationId,
+                        "dispatchId" to dispatch.dispatchId,
+                        "errorCode" to "DISPATCH_ERROR",
+                        "errorMessage" to "Dispatch adapter failed"
+                    )
+                )
+            )
+
+            idempotencyRepository.linkAuthorization(
+                tenantId = command.tenantId,
+                idempotencyKey = command.idempotencyKey,
+                authorizationId = failed.authorizationId,
+                responseSnapshot = objectMapper.writeValueAsString(
+                    mapOf(
+                        "authorizationId" to failed.authorizationId,
+                        "status" to failed.status.name
+                    )
+                )
+            )
+            return CreateAuthorizationResult(failed, replayed = false)
+        }
+
+        outboxEventRepository.append(
+            aggregateType = "AUTHORIZATION",
+            aggregateId = validated.authorizationId,
+            event = DomainEvent(
+                eventId = UUID.randomUUID(),
+                eventType = "EVT-006",
+                eventVersion = 1,
+                occurredAt = dispatch.updatedAt,
+                tenantId = validated.tenantId,
+                correlationId = command.correlationId,
+                payload = mapOf(
+                    "authorizationId" to validated.authorizationId,
+                    "dispatchId" to dispatch.dispatchId,
+                    "attempt" to dispatch.attemptCount,
+                    "sentAt" to dispatch.updatedAt.toString()
+                )
+            )
+        )
+
+        if (dispatch.technicalStatus == TechnicalStatus.ACK_RECEIVED) {
+            outboxEventRepository.append(
+                aggregateType = "AUTHORIZATION",
+                aggregateId = validated.authorizationId,
+                event = DomainEvent(
+                    eventId = UUID.randomUUID(),
+                    eventType = "EVT-007",
+                    eventVersion = 1,
+                    occurredAt = OffsetDateTime.now(),
+                    tenantId = validated.tenantId,
+                    correlationId = command.correlationId,
+                    payload = mapOf(
+                        "authorizationId" to validated.authorizationId,
+                        "dispatchId" to dispatch.dispatchId,
+                        "externalProtocol" to dispatch.externalProtocol
+                    )
+                )
+            )
+        }
 
         val dispatched = validated.copy(
             status = AuthorizationStatus.DISPATCHED,
             updatedAt = OffsetDateTime.now()
         )
         authorizationRepository.updateStatus(dispatched)
-        outboxEventRepository.append(
-            aggregateType = "AUTHORIZATION",
-            aggregateId = dispatched.authorizationId,
-            event = DomainEvent(
-                eventId = UUID.randomUUID(),
-                eventType = "EVT-005",
-                eventVersion = 1,
-                occurredAt = dispatched.updatedAt,
-                tenantId = dispatched.tenantId,
-                correlationId = command.correlationId,
-                payload = mapOf(
-                    "authorizationId" to dispatched.authorizationId,
-                    "operatorCode" to dispatched.operatorCode,
-                    "dispatchId" to dispatch.dispatchId,
-                    "dispatchType" to dispatch.dispatchType.name
-                )
-            )
-        )
 
         idempotencyRepository.linkAuthorization(
             tenantId = command.tenantId,

@@ -1,21 +1,25 @@
 package br.com.autorizasaude.tisshub.operatordispatch.application
 
 import br.com.autorizasaude.tisshub.authorization.domain.Authorization
+import br.com.autorizasaude.tisshub.operatordispatch.application.OperatorAdapter
 import br.com.autorizasaude.tisshub.operatordispatch.domain.DispatchType
 import br.com.autorizasaude.tisshub.operatordispatch.domain.OperatorDispatch
 import br.com.autorizasaude.tisshub.operatordispatch.domain.TechnicalStatus
 import br.com.autorizasaude.tisshub.operatordispatch.infrastructure.OperatorDispatchRepository
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.inject.Instance
+import java.text.Normalizer
 import java.time.OffsetDateTime
 import java.util.UUID
 
 @ApplicationScoped
 class OperatorDispatchService(
-    private val repository: OperatorDispatchRepository
+    private val repository: OperatorDispatchRepository,
+    private val adapters: Instance<OperatorAdapter>
 ) {
     fun requestDispatch(authorization: Authorization): OperatorDispatch {
         val now = OffsetDateTime.now()
-        val dispatch = OperatorDispatch(
+        val created = OperatorDispatch(
             dispatchId = UUID.randomUUID(),
             tenantId = authorization.tenantId,
             authorizationId = authorization.authorizationId,
@@ -27,18 +31,85 @@ class OperatorDispatchService(
             createdAt = now,
             updatedAt = now
         )
-        repository.insert(dispatch)
-        return dispatch
+        repository.insert(created)
+
+        val adapter = adapters.iterator().asSequence().firstOrNull { it.dispatchType == created.dispatchType }
+        if (adapter == null) {
+            val failed = created.copy(
+                technicalStatus = TechnicalStatus.TECHNICAL_ERROR,
+                attemptCount = 1,
+                updatedAt = OffsetDateTime.now()
+            )
+            repository.update(failed)
+            return failed
+        }
+
+        return try {
+            val sendResult = adapter.send(created)
+            val updated = created.copy(
+                technicalStatus = sendResult.technicalStatus,
+                attemptCount = 1,
+                externalProtocol = sendResult.externalProtocol,
+                updatedAt = OffsetDateTime.now()
+            )
+            repository.update(updated)
+            updated
+        } catch (_: Exception) {
+            val failed = created.copy(
+                technicalStatus = TechnicalStatus.TECHNICAL_ERROR,
+                attemptCount = 1,
+                updatedAt = OffsetDateTime.now()
+            )
+            repository.update(failed)
+            failed
+        }
     }
 
     fun findLatestDispatch(tenantId: UUID, authorizationId: UUID): OperatorDispatch? =
         repository.findLatestByAuthorization(tenantId, authorizationId)
 
     private fun resolveDispatchType(operatorCode: String): DispatchType {
-        return when (operatorCode.trim().uppercase()) {
-            "BRADESCO", "SULAMERICA", "AMIL", "PORTO", "OMINT" -> DispatchType.TYPE_A
-            "UNIMED", "ALLIANZ", "CAREPLUS", "MEDISERVICE" -> DispatchType.TYPE_B
+        val normalized = normalizeOperatorCode(operatorCode)
+        return when {
+            TYPE_A_CODES.contains(normalized) -> DispatchType.TYPE_A
+            TYPE_B_CODES.contains(normalized) -> DispatchType.TYPE_B
             else -> DispatchType.TYPE_C
         }
+    }
+
+    private fun normalizeOperatorCode(value: String): String {
+        val withoutAccents = Normalizer
+            .normalize(value.trim(), Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "")
+        return withoutAccents
+            .uppercase()
+            .replace(Regex("[^A-Z0-9]+"), "_")
+            .replace(Regex("_+"), "_")
+            .trim('_')
+    }
+
+    private companion object {
+        val TYPE_A_CODES = setOf(
+            "BRADESCO",
+            "BRADESCO_SAUDE",
+            "SULAMERICA",
+            "SUL_AMERICA",
+            "SULAMERICA_SAUDE",
+            "AMIL",
+            "AMIL_SAUDE",
+            "PORTO",
+            "PORTO_SEGURO",
+            "OMINT"
+        )
+
+        val TYPE_B_CODES = setOf(
+            "UNIMED",
+            "UNIMED_ANAPOLIS",
+            "ALLIANZ_SAUDE",
+            "CAREPLUS",
+            "CARE_PLUS",
+            "MEDISERVICE",
+            "MEDISERVICE_SAUDE"
+        )
     }
 }
