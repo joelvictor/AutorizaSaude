@@ -1,6 +1,7 @@
 package br.com.autorizasaude.tisshub.api
 
 import br.com.autorizasaude.tisshub.authorization.application.AuthorizationService
+import br.com.autorizasaude.tisshub.authorization.application.AuthorizationStatusQueryService
 import br.com.autorizasaude.tisshub.authorization.application.CancelAuthorizationCommand
 import br.com.autorizasaude.tisshub.authorization.application.CreateAuthorizationCommand
 import br.com.autorizasaude.tisshub.authorization.application.IdempotencyConflictException
@@ -47,11 +48,33 @@ data class AuthorizationResponse(
     }
 }
 
+data class AuthorizationStatusResponse(
+    val authorizationId: UUID,
+    val status: AuthorizationStatus,
+    val timeline: List<AuthorizationTimelineResponseItem>,
+    val dispatch: DispatchStatusResponse?
+)
+
+data class AuthorizationTimelineResponseItem(
+    val at: String,
+    val eventType: String,
+    val detail: String
+)
+
+data class DispatchStatusResponse(
+    val dispatchId: UUID,
+    val dispatchType: String,
+    val technicalStatus: String,
+    val attemptCount: Int,
+    val externalProtocol: String?
+)
+
 @Path("/v1/authorizations")
 @Consumes(MediaType.APPLICATION_JSON)
 @Produces(MediaType.APPLICATION_JSON)
 class AuthorizationResource(
-    private val authorizationService: AuthorizationService
+    private val authorizationService: AuthorizationService,
+    private val authorizationStatusQueryService: AuthorizationStatusQueryService
 ) {
 
     @POST
@@ -97,6 +120,36 @@ class AuthorizationResource(
         val tenantId = parseRequiredUuidHeader("X-Tenant-Id", tenantIdHeader)
         val authorization = authorizationService.getById(tenantId, authorizationId) ?: throw NotFoundException()
         return AuthorizationResponse.from(authorization)
+    }
+
+    @GET
+    @Path("/{authorizationId}/status")
+    fun getStatus(
+        @HeaderParam("X-Tenant-Id") tenantIdHeader: String?,
+        @PathParam("authorizationId") authorizationId: UUID
+    ): AuthorizationStatusResponse {
+        val tenantId = parseRequiredUuidHeader("X-Tenant-Id", tenantIdHeader)
+        val statusView = authorizationStatusQueryService.getStatus(tenantId, authorizationId) ?: throw NotFoundException()
+        return AuthorizationStatusResponse(
+            authorizationId = statusView.authorizationId,
+            status = statusView.status,
+            timeline = statusView.timeline.map {
+                AuthorizationTimelineResponseItem(
+                    at = it.at.toString(),
+                    eventType = it.eventType,
+                    detail = it.detail
+                )
+            },
+            dispatch = statusView.dispatch?.let {
+                DispatchStatusResponse(
+                    dispatchId = it.dispatchId,
+                    dispatchType = it.dispatchType,
+                    technicalStatus = it.technicalStatus,
+                    attemptCount = it.attemptCount,
+                    externalProtocol = it.externalProtocol
+                )
+            }
+        )
     }
 
     @POST
