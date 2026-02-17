@@ -5,6 +5,7 @@ import br.com.autorizasaude.tisshub.authorization.domain.AuthorizationStatus
 import br.com.autorizasaude.tisshub.authorization.infrastructure.AuthorizationRepository
 import br.com.autorizasaude.tisshub.authorization.infrastructure.IdempotencyRepository
 import br.com.autorizasaude.tisshub.authorization.infrastructure.OutboxEventRepository
+import br.com.autorizasaude.tisshub.operatordispatch.application.OperatorDispatchService
 import br.com.autorizasaude.tisshub.shared.events.DomainEvent
 import com.fasterxml.jackson.databind.ObjectMapper
 import jakarta.enterprise.context.ApplicationScoped
@@ -44,6 +45,7 @@ class AuthorizationService(
     private val authorizationRepository: AuthorizationRepository,
     private val idempotencyRepository: IdempotencyRepository,
     private val outboxEventRepository: OutboxEventRepository,
+    private val operatorDispatchService: OperatorDispatchService,
     private val objectMapper: ObjectMapper
 ) {
     @Transactional
@@ -83,7 +85,7 @@ class AuthorizationService(
         }
 
         val now = OffsetDateTime.now()
-        val authorization = Authorization(
+        val authorizationDraft = Authorization(
             authorizationId = UUID.randomUUID(),
             tenantId = command.tenantId,
             patientId = command.patientId,
@@ -95,10 +97,10 @@ class AuthorizationService(
             updatedAt = now
         )
 
-        authorizationRepository.insert(authorization)
+        authorizationRepository.insert(authorizationDraft)
         outboxEventRepository.append(
             aggregateType = "AUTHORIZATION",
-            aggregateId = authorization.authorizationId,
+            aggregateId = authorizationDraft.authorizationId,
             event = DomainEvent(
                 eventId = UUID.randomUUID(),
                 eventType = "EVT-001",
@@ -107,24 +109,73 @@ class AuthorizationService(
                 tenantId = command.tenantId,
                 correlationId = command.correlationId,
                 payload = mapOf(
-                    "authorizationId" to authorization.authorizationId,
-                    "patientId" to authorization.patientId,
-                    "procedureCodes" to authorization.procedureCodes
+                    "authorizationId" to authorizationDraft.authorizationId,
+                    "patientId" to authorizationDraft.patientId,
+                    "procedureCodes" to authorizationDraft.procedureCodes
                 )
             )
         )
+
+        val validated = authorizationDraft.copy(
+            status = AuthorizationStatus.VALIDATED,
+            updatedAt = OffsetDateTime.now()
+        )
+        authorizationRepository.updateStatus(validated)
+        outboxEventRepository.append(
+            aggregateType = "AUTHORIZATION",
+            aggregateId = validated.authorizationId,
+            event = DomainEvent(
+                eventId = UUID.randomUUID(),
+                eventType = "EVT-002",
+                eventVersion = 1,
+                occurredAt = validated.updatedAt,
+                tenantId = validated.tenantId,
+                correlationId = command.correlationId,
+                payload = mapOf(
+                    "authorizationId" to validated.authorizationId,
+                    "validationSummary" to "business-rules-ok"
+                )
+            )
+        )
+
+        val dispatch = operatorDispatchService.requestDispatch(validated)
+
+        val dispatched = validated.copy(
+            status = AuthorizationStatus.DISPATCHED,
+            updatedAt = OffsetDateTime.now()
+        )
+        authorizationRepository.updateStatus(dispatched)
+        outboxEventRepository.append(
+            aggregateType = "AUTHORIZATION",
+            aggregateId = dispatched.authorizationId,
+            event = DomainEvent(
+                eventId = UUID.randomUUID(),
+                eventType = "EVT-005",
+                eventVersion = 1,
+                occurredAt = dispatched.updatedAt,
+                tenantId = dispatched.tenantId,
+                correlationId = command.correlationId,
+                payload = mapOf(
+                    "authorizationId" to dispatched.authorizationId,
+                    "operatorCode" to dispatched.operatorCode,
+                    "dispatchId" to dispatch.dispatchId,
+                    "dispatchType" to dispatch.dispatchType.name
+                )
+            )
+        )
+
         idempotencyRepository.linkAuthorization(
             tenantId = command.tenantId,
             idempotencyKey = command.idempotencyKey,
-            authorizationId = authorization.authorizationId,
+            authorizationId = dispatched.authorizationId,
             responseSnapshot = objectMapper.writeValueAsString(
                 mapOf(
-                    "authorizationId" to authorization.authorizationId,
-                    "status" to authorization.status.name
+                    "authorizationId" to dispatched.authorizationId,
+                    "status" to dispatched.status.name
                 )
             )
         )
-        return CreateAuthorizationResult(authorization, replayed = false)
+        return CreateAuthorizationResult(dispatched, replayed = false)
     }
 
     fun getById(tenantId: UUID, id: UUID): Authorization? = authorizationRepository.findById(tenantId, id)

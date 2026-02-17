@@ -21,16 +21,22 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateAuthorizationRequest'
       responses:
+        '200':
+          description: Reprocessamento idempotente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizationResponse'
         '201':
           description: Criada
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthorizationResponse'
+        '400':
+          description: Erro de cabecalho ou payload invalido
         '409':
           description: Conflito de idempotencia
-        '422':
-          description: Erro de validacao
   /v1/authorizations/{authorizationId}:
     get:
       summary: Consultar autorizacao
@@ -83,6 +89,8 @@ paths:
       responses:
         '202':
           description: Cancelamento aceito
+        '200':
+          description: Cancelada
         '409':
           description: Estado nao permite cancelamento
 components:
@@ -210,3 +218,24 @@ components:
                 type: string
               detail:
                 type: string
+        dispatch:
+          type: object
+          nullable: true
+          required:
+            - dispatchId
+            - dispatchType
+            - technicalStatus
+            - attemptCount
+          properties:
+            dispatchId:
+              type: string
+              format: uuid
+            dispatchType:
+              type: string
+            technicalStatus:
+              type: string
+            attemptCount:
+              type: integer
+            externalProtocol:
+              type: string
+              nullable: true

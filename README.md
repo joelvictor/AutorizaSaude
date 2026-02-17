@@ -34,6 +34,7 @@ Endpoints iniciais:
 
 - `POST /v1/authorizations`
 - `GET /v1/authorizations/{authorizationId}`
+- `GET /v1/authorizations/{authorizationId}/status`
 - `POST /v1/authorizations/{authorizationId}/cancel`
 
 ## Frontend
@@ -56,7 +57,7 @@ Passos:
 
 ## Proximos Incrementos
 
-1. Implementar adapters por operadora (Tipo A/B/C) em `operator-dispatch`.
+1. Implementar adaptadores reais por operadora (Tipo A/B/C) no `operator-dispatch`.
 2. Conectar `tiss-guide` com validacao XSD real.
-3. Substituir store em memoria por repositorio PostgreSQL.
-4. Integrar dashboard com API real e stream de eventos.
+3. Integrar dashboard com API real e stream de eventos.
+4. Adicionar worker de publicacao de outbox e reprocessamento de DLQ.

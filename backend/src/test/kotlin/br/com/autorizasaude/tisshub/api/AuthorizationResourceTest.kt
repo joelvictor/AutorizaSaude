@@ -30,7 +30,7 @@ class AuthorizationResourceTest {
             .then()
             .statusCode(201)
             .body("authorizationId", notNullValue())
-            .body("status", equalTo("DRAFT"))
+            .body("status", equalTo("DISPATCHED"))
     }
 
     @Test
@@ -68,7 +68,7 @@ class AuthorizationResourceTest {
             .then()
             .statusCode(200)
             .body("authorizationId", equalTo(authorizationId))
-            .body("status", equalTo("DRAFT"))
+            .body("status", equalTo("DISPATCHED"))
     }
 
     @Test
@@ -179,5 +179,44 @@ class AuthorizationResourceTest {
             .then()
             .statusCode(200)
             .body("status", equalTo("CANCELLED"))
+    }
+
+    @Test
+    fun `should return consolidated status with timeline and dispatch`() {
+        val tenantId = UUID.randomUUID().toString()
+        val authorizationId = given()
+            .header("X-Tenant-Id", tenantId)
+            .header("X-Correlation-Id", UUID.randomUUID().toString())
+            .header("X-Idempotency-Key", "idem-${UUID.randomUUID()}")
+            .contentType("application/json")
+            .body(
+                """
+                {
+                  "patientId": "P-006",
+                  "operatorCode": "BRADESCO",
+                  "procedureCodes": ["55555555"],
+                  "clinicalJustification": "Status consolidado"
+                }
+                """.trimIndent()
+            )
+            .`when`().post("/v1/authorizations")
+            .then()
+            .statusCode(201)
+            .extract()
+            .path<String>("authorizationId")
+
+        given()
+            .header("X-Tenant-Id", tenantId)
+            .`when`().get("/v1/authorizations/$authorizationId/status")
+            .then()
+            .statusCode(200)
+            .body("authorizationId", equalTo(authorizationId))
+            .body("status", equalTo("DISPATCHED"))
+            .body("timeline.size()", equalTo(3))
+            .body("timeline[0].eventType", equalTo("EVT-001"))
+            .body("timeline[1].eventType", equalTo("EVT-002"))
+            .body("timeline[2].eventType", equalTo("EVT-005"))
+            .body("dispatch.dispatchType", equalTo("TYPE_A"))
+            .body("dispatch.technicalStatus", equalTo("READY"))
     }
 }

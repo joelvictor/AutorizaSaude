@@ -47,8 +47,8 @@ create table if not exists tiss_guides (
 create table if not exists operator_dispatches (
   id bigserial primary key,
   dispatch_id uuid not null unique,
-  authorization_pk bigint not null references authorizations(id),
   tenant_id uuid not null,
+  authorization_id uuid not null,
   operator_code text not null,
   dispatch_type text not null,
   technical_status text not null,
@@ -60,7 +60,9 @@ create table if not exists operator_dispatches (
   ack_at timestamptz,
   completed_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint fk_operator_dispatch_authorization
+    foreign key (tenant_id, authorization_id) references authorizations(tenant_id, authorization_id)
 );
 
 create table if not exists outbox_events (
