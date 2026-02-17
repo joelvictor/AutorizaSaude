@@ -30,3 +30,13 @@
 - Evento vai para DLQ apos esgotar tentativas.
 - Alertas operacionais com severidade alta.
 - Reprocessamento manual com comando explicito e auditado.
+
+## Outbox Relay (Implementado na Fase 4)
+
+- Worker interno processa eventos pendentes de `outbox_events`.
+- Publicacao bem-sucedida marca `published_at`.
+- Falhas incrementam `publish_attempts` e registram `last_error`.
+- Ao atingir limite de tentativas, evento recebe `dead_letter_at` e espelha em `outbox_dead_letters`.
+- Operacao manual disponivel via API:
+  - `GET /v1/operations/outbox`
+  - `POST /v1/operations/outbox/process`
