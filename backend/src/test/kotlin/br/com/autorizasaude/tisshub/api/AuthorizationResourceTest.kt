@@ -2,8 +2,10 @@ package br.com.autorizasaude.tisshub.api
 
 import io.quarkus.test.junit.QuarkusTest
 import io.restassured.RestAssured.given
+import org.hamcrest.CoreMatchers.containsString
 import org.hamcrest.CoreMatchers.equalTo
 import org.hamcrest.CoreMatchers.notNullValue
+import org.hamcrest.CoreMatchers.not
 import org.hamcrest.CoreMatchers.nullValue
 import org.junit.jupiter.api.Test
 import java.util.UUID
@@ -220,6 +222,9 @@ class AuthorizationResourceTest {
             .body("timeline[3].eventType", equalTo("EVT-005"))
             .body("timeline[4].eventType", equalTo("EVT-006"))
             .body("timeline[5].eventType", equalTo("EVT-007"))
+            .body("timeline[3].detail", containsString("\"dispatchType\":\"TYPE_A\""))
+            .body("timeline[4].detail", containsString("\"sentAt\""))
+            .body("timeline[4].detail", not(containsString("technicalStatus")))
             .body("dispatch.dispatchType", equalTo("TYPE_A"))
             .body("dispatch.technicalStatus", equalTo("ACK_RECEIVED"))
     }
@@ -271,7 +276,7 @@ class AuthorizationResourceTest {
                 """
                 {
                   "patientId": "P-008",
-                  "operatorCode": "UNIMED",
+                  "operatorCode": "UNIMED_ANAPOLIS",
                   "procedureCodes": ["77777777"],
                   "clinicalJustification": "Fluxo tipo B"
                 }

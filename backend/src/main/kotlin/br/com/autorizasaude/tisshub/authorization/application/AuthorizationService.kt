@@ -198,6 +198,7 @@ class AuthorizationService(
             )
         )
 
+        val dispatch = operatorDispatchService.requestDispatch(validated)
         outboxEventRepository.append(
             aggregateType = "AUTHORIZATION",
             aggregateId = validated.authorizationId,
@@ -205,17 +206,17 @@ class AuthorizationService(
                 eventId = UUID.randomUUID(),
                 eventType = "EVT-005",
                 eventVersion = 1,
-                occurredAt = OffsetDateTime.now(),
+                occurredAt = dispatch.createdAt,
                 tenantId = validated.tenantId,
                 correlationId = command.correlationId,
                 payload = mapOf(
                     "authorizationId" to validated.authorizationId,
-                    "operatorCode" to validated.operatorCode
+                    "operatorCode" to validated.operatorCode,
+                    "dispatchType" to dispatch.dispatchType.name
                 )
             )
         )
 
-        val dispatch = operatorDispatchService.requestDispatch(validated)
         if (dispatch.technicalStatus == TechnicalStatus.TECHNICAL_ERROR) {
             val failed = validated.copy(
                 status = AuthorizationStatus.FAILED_TECHNICAL,
@@ -269,7 +270,7 @@ class AuthorizationService(
                     "authorizationId" to validated.authorizationId,
                     "dispatchId" to dispatch.dispatchId,
                     "attempt" to dispatch.attemptCount,
-                    "technicalStatus" to dispatch.technicalStatus.name
+                    "sentAt" to dispatch.updatedAt.toString()
                 )
             )
         )
