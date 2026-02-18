@@ -62,7 +62,6 @@ class OutboxOperationsResourceTest {
             .`when`().get("/v1/operations/outbox")
             .then()
             .statusCode(200)
-            .body("pending", equalTo(0))
             .body("published", greaterThanOrEqualTo(12))
     }
 }

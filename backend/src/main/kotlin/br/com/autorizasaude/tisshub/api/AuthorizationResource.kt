@@ -7,6 +7,7 @@ import br.com.autorizasaude.tisshub.authorization.application.CreateAuthorizatio
 import br.com.autorizasaude.tisshub.authorization.application.IdempotencyConflictException
 import br.com.autorizasaude.tisshub.authorization.application.IdempotencyInProgressException
 import br.com.autorizasaude.tisshub.authorization.application.PollAuthorizationStatusCommand
+import br.com.autorizasaude.tisshub.authorization.application.CancellationNotAllowedException
 import br.com.autorizasaude.tisshub.authorization.domain.Authorization
 import br.com.autorizasaude.tisshub.authorization.domain.AuthorizationStatus
 import jakarta.ws.rs.Consumes
@@ -175,16 +176,20 @@ class AuthorizationResource(
         if (request.reason.isBlank()) {
             throw WebApplicationException("reason is required", Response.Status.BAD_REQUEST)
         }
-        val authorization = authorizationService.cancel(
-            CancelAuthorizationCommand(
-                tenantId = tenantId,
-                correlationId = correlationId,
-                authorizationId = authorizationId,
-                reason = request.reason.trim()
-            )
-        ) ?: throw NotFoundException()
-        val operatorProtocol = resolveOperatorProtocol(authorization.tenantId, authorization.authorizationId)
-        return AuthorizationResponse.from(authorization, operatorProtocol)
+        return try {
+            val authorization = authorizationService.cancel(
+                CancelAuthorizationCommand(
+                    tenantId = tenantId,
+                    correlationId = correlationId,
+                    authorizationId = authorizationId,
+                    reason = request.reason.trim()
+                )
+            ) ?: throw NotFoundException()
+            val operatorProtocol = resolveOperatorProtocol(authorization.tenantId, authorization.authorizationId)
+            AuthorizationResponse.from(authorization, operatorProtocol)
+        } catch (_: CancellationNotAllowedException) {
+            throw WebApplicationException("Authorization cannot be cancelled in current state", Response.Status.CONFLICT)
+        }
     }
 
     @POST

@@ -390,4 +390,47 @@ class AuthorizationResourceTest {
             .body("timeline[6].eventType", equalTo("EVT-010"))
             .body("timeline[5].detail", containsString("\"externalStatus\":\"DENIED\""))
     }
+
+    @Test
+    fun `should return conflict when cancelling final authorization`() {
+        val tenantId = UUID.randomUUID().toString()
+        val authorizationId = given()
+            .header("X-Tenant-Id", tenantId)
+            .header("X-Correlation-Id", UUID.randomUUID().toString())
+            .header("X-Idempotency-Key", "idem-${UUID.randomUUID()}")
+            .contentType("application/json")
+            .body(
+                """
+                {
+                  "patientId": "P-011",
+                  "operatorCode": "ALLIANZ_SAUDE",
+                  "procedureCodes": ["11112222"],
+                  "clinicalJustification": "Nao deve permitir cancelamento apos negativa"
+                }
+                """.trimIndent()
+            )
+            .`when`().post("/v1/authorizations")
+            .then()
+            .statusCode(201)
+            .body("status", equalTo("PENDING_OPERATOR"))
+            .extract()
+            .path<String>("authorizationId")
+
+        given()
+            .header("X-Tenant-Id", tenantId)
+            .header("X-Correlation-Id", UUID.randomUUID().toString())
+            .`when`().post("/v1/authorizations/$authorizationId/poll")
+            .then()
+            .statusCode(200)
+            .body("status", equalTo("DENIED"))
+
+        given()
+            .header("X-Tenant-Id", tenantId)
+            .header("X-Correlation-Id", UUID.randomUUID().toString())
+            .contentType("application/json")
+            .body("""{"reason":"Tentativa tardia"}""")
+            .`when`().post("/v1/authorizations/$authorizationId/cancel")
+            .then()
+            .statusCode(409)
+    }
 }

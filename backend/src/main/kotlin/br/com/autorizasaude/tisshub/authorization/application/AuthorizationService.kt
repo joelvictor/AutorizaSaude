@@ -50,6 +50,7 @@ data class CreateAuthorizationResult(
 
 class IdempotencyConflictException : RuntimeException("Idempotency key already used with a different payload")
 class IdempotencyInProgressException : RuntimeException("Idempotency key is already being processed")
+class CancellationNotAllowedException : RuntimeException("Authorization is already in a final state")
 
 @ApplicationScoped
 class AuthorizationService(
@@ -533,8 +534,11 @@ class AuthorizationService(
     @Transactional
     fun cancel(command: CancelAuthorizationCommand): Authorization? {
         val current = authorizationRepository.findById(command.tenantId, command.authorizationId) ?: return null
-        if (current.status == AuthorizationStatus.AUTHORIZED || current.status == AuthorizationStatus.DENIED) {
-            return current
+        if (current.status == AuthorizationStatus.AUTHORIZED ||
+            current.status == AuthorizationStatus.DENIED ||
+            current.status == AuthorizationStatus.EXPIRED
+        ) {
+            throw CancellationNotAllowedException()
         }
         val cancelled = current.copy(
             status = AuthorizationStatus.CANCELLED,
