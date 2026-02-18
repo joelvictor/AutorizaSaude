@@ -50,12 +50,14 @@ data class CreateAuthorizationResult(
 
 class IdempotencyConflictException : RuntimeException("Idempotency key already used with a different payload")
 class IdempotencyInProgressException : RuntimeException("Idempotency key is already being processed")
+class CancellationNotAllowedException : RuntimeException("Authorization is already in a final state")
 
 @ApplicationScoped
 class AuthorizationService(
     private val authorizationRepository: AuthorizationRepository,
     private val idempotencyRepository: IdempotencyRepository,
     private val outboxEventRepository: OutboxEventRepository,
+    private val idempotencyConflictEventPublisher: IdempotencyConflictEventPublisher,
     private val operatorDispatchService: OperatorDispatchService,
     private val tissGuideService: TissGuideService,
     private val objectMapper: ObjectMapper
@@ -67,21 +69,14 @@ class AuthorizationService(
 
         if (existing != null) {
             if (existing.requestHash != requestHash) {
-                outboxEventRepository.append(
-                    aggregateType = "IDEMPOTENCY",
-                    aggregateId = UUID.randomUUID(),
-                    event = DomainEvent(
-                        eventId = UUID.randomUUID(),
-                        eventType = "EVT-015",
-                        eventVersion = 1,
-                        occurredAt = OffsetDateTime.now(),
-                        tenantId = command.tenantId,
-                        correlationId = command.correlationId,
-                        payload = mapOf(
-                            "idempotencyKey" to command.idempotencyKey,
-                            "detectedAt" to OffsetDateTime.now().toString()
-                        )
-                    )
+                if (existing.authorizationId == null) {
+                    throw IdempotencyInProgressException()
+                }
+                idempotencyConflictEventPublisher.publish(
+                    tenantId = command.tenantId,
+                    correlationId = command.correlationId,
+                    idempotencyKey = command.idempotencyKey,
+                    authorizationId = existing.authorizationId
                 )
                 throw IdempotencyConflictException()
             }
@@ -542,8 +537,9 @@ class AuthorizationService(
     @Transactional
     fun cancel(command: CancelAuthorizationCommand): Authorization? {
         val current = authorizationRepository.findById(command.tenantId, command.authorizationId) ?: return null
-        if (current.status == AuthorizationStatus.AUTHORIZED || current.status == AuthorizationStatus.DENIED) {
-            return current
+        val cancellableStatuses = setOf(AuthorizationStatus.DISPATCHED, AuthorizationStatus.PENDING_OPERATOR)
+        if (!cancellableStatuses.contains(current.status)) {
+            throw CancellationNotAllowedException()
         }
         val cancelled = current.copy(
             status = AuthorizationStatus.CANCELLED,

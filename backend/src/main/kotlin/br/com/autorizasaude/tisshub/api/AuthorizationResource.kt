@@ -7,6 +7,7 @@ import br.com.autorizasaude.tisshub.authorization.application.CreateAuthorizatio
 import br.com.autorizasaude.tisshub.authorization.application.IdempotencyConflictException
 import br.com.autorizasaude.tisshub.authorization.application.IdempotencyInProgressException
 import br.com.autorizasaude.tisshub.authorization.application.PollAuthorizationStatusCommand
+import br.com.autorizasaude.tisshub.authorization.application.CancellationNotAllowedException
 import br.com.autorizasaude.tisshub.authorization.domain.Authorization
 import br.com.autorizasaude.tisshub.authorization.domain.AuthorizationStatus
 import jakarta.ws.rs.Consumes
@@ -20,6 +21,7 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
+import java.time.OffsetDateTime
 import java.util.UUID
 
 data class CreateAuthorizationRequest(
@@ -37,14 +39,20 @@ data class AuthorizationResponse(
     val authorizationId: UUID,
     val tenantId: UUID,
     val status: AuthorizationStatus,
-    val operatorCode: String
+    val operatorCode: String,
+    val operatorProtocol: String?,
+    val createdAt: OffsetDateTime,
+    val updatedAt: OffsetDateTime
 ) {
     companion object {
-        fun from(auth: Authorization) = AuthorizationResponse(
+        fun from(auth: Authorization, operatorProtocol: String?) = AuthorizationResponse(
             authorizationId = auth.authorizationId,
             tenantId = auth.tenantId,
             status = auth.status,
-            operatorCode = auth.operatorCode
+            operatorCode = auth.operatorCode,
+            operatorProtocol = operatorProtocol,
+            createdAt = auth.createdAt,
+            updatedAt = auth.updatedAt
         )
     }
 }
@@ -104,7 +112,8 @@ class AuthorizationResource(
                 )
             )
             val status = if (result.replayed) Response.Status.OK else Response.Status.CREATED
-            Response.status(status).entity(AuthorizationResponse.from(result.authorization)).build()
+            val operatorProtocol = resolveOperatorProtocol(result.authorization.tenantId, result.authorization.authorizationId)
+            Response.status(status).entity(AuthorizationResponse.from(result.authorization, operatorProtocol)).build()
         } catch (_: IdempotencyConflictException) {
             throw WebApplicationException("Idempotency conflict detected", Response.Status.CONFLICT)
         } catch (_: IdempotencyInProgressException) {
@@ -120,7 +129,8 @@ class AuthorizationResource(
     ): AuthorizationResponse {
         val tenantId = parseRequiredUuidHeader("X-Tenant-Id", tenantIdHeader)
         val authorization = authorizationService.getById(tenantId, authorizationId) ?: throw NotFoundException()
-        return AuthorizationResponse.from(authorization)
+        val operatorProtocol = resolveOperatorProtocol(authorization.tenantId, authorization.authorizationId)
+        return AuthorizationResponse.from(authorization, operatorProtocol)
     }
 
     @GET
@@ -166,15 +176,20 @@ class AuthorizationResource(
         if (request.reason.isBlank()) {
             throw WebApplicationException("reason is required", Response.Status.BAD_REQUEST)
         }
-        val authorization = authorizationService.cancel(
-            CancelAuthorizationCommand(
-                tenantId = tenantId,
-                correlationId = correlationId,
-                authorizationId = authorizationId,
-                reason = request.reason.trim()
-            )
-        ) ?: throw NotFoundException()
-        return AuthorizationResponse.from(authorization)
+        return try {
+            val authorization = authorizationService.cancel(
+                CancelAuthorizationCommand(
+                    tenantId = tenantId,
+                    correlationId = correlationId,
+                    authorizationId = authorizationId,
+                    reason = request.reason.trim()
+                )
+            ) ?: throw NotFoundException()
+            val operatorProtocol = resolveOperatorProtocol(authorization.tenantId, authorization.authorizationId)
+            AuthorizationResponse.from(authorization, operatorProtocol)
+        } catch (_: CancellationNotAllowedException) {
+            throw WebApplicationException("Authorization cannot be cancelled in current state", Response.Status.CONFLICT)
+        }
     }
 
     @POST
@@ -194,7 +209,15 @@ class AuthorizationResource(
                 authorizationId = authorizationId
             )
         ) ?: throw NotFoundException()
-        return AuthorizationResponse.from(authorization)
+        val operatorProtocol = resolveOperatorProtocol(authorization.tenantId, authorization.authorizationId)
+        return AuthorizationResponse.from(authorization, operatorProtocol)
+    }
+
+    private fun resolveOperatorProtocol(tenantId: UUID, authorizationId: UUID): String? {
+        return authorizationStatusQueryService
+            .getStatus(tenantId, authorizationId)
+            ?.dispatch
+            ?.externalProtocol
     }
 
     private fun parseRequiredUuidHeader(name: String, value: String?): UUID {
