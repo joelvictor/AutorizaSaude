@@ -56,6 +56,7 @@ class AuthorizationService(
     private val authorizationRepository: AuthorizationRepository,
     private val idempotencyRepository: IdempotencyRepository,
     private val outboxEventRepository: OutboxEventRepository,
+    private val idempotencyConflictEventPublisher: IdempotencyConflictEventPublisher,
     private val operatorDispatchService: OperatorDispatchService,
     private val tissGuideService: TissGuideService,
     private val objectMapper: ObjectMapper
@@ -67,21 +68,11 @@ class AuthorizationService(
 
         if (existing != null) {
             if (existing.requestHash != requestHash) {
-                outboxEventRepository.append(
-                    aggregateType = "IDEMPOTENCY",
-                    aggregateId = UUID.randomUUID(),
-                    event = DomainEvent(
-                        eventId = UUID.randomUUID(),
-                        eventType = "EVT-015",
-                        eventVersion = 1,
-                        occurredAt = OffsetDateTime.now(),
-                        tenantId = command.tenantId,
-                        correlationId = command.correlationId,
-                        payload = mapOf(
-                            "idempotencyKey" to command.idempotencyKey,
-                            "detectedAt" to OffsetDateTime.now().toString()
-                        )
-                    )
+                idempotencyConflictEventPublisher.publish(
+                    tenantId = command.tenantId,
+                    correlationId = command.correlationId,
+                    idempotencyKey = command.idempotencyKey,
+                    authorizationId = existing.authorizationId
                 )
                 throw IdempotencyConflictException()
             }

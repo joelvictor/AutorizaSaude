@@ -33,6 +33,9 @@ class AuthorizationResourceTest {
             .then()
             .statusCode(201)
             .body("authorizationId", notNullValue())
+            .body("createdAt", notNullValue())
+            .body("updatedAt", notNullValue())
+            .body("operatorProtocol", notNullValue())
             .body("status", equalTo("DISPATCHED"))
     }
 
