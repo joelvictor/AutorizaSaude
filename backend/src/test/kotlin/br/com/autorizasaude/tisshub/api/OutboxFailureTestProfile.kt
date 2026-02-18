@@ -7,7 +7,7 @@ class OutboxFailureTestProfile : QuarkusTestProfile {
         return mapOf(
             "quarkus.scheduler.enabled" to "false",
             "tisshub.outbox.fail-event-types" to "EVT-002",
-            "tisshub.outbox.retry-delays-seconds" to "0,0,0"
+            "tisshub.outbox.retry-delays-seconds" to "0,0"
         )
     }
 }

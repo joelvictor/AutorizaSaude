@@ -38,7 +38,8 @@ class OutboxRelayService(
     fun processPending(): OutboxRelayResult {
         val batchSize = OUTBOX_BATCH_SIZE
         val retryDelays = retryDelaysSeconds
-        val maxAttempts = retryDelays.size
+        // Number of failures allowed before DLQ = initial failure + configured retry windows.
+        val maxAttempts = retryDelays.size + 1
         val pending = outboxEventRepository.findPending(batchSize)
 
         var published = 0
