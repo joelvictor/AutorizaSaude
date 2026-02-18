@@ -80,7 +80,7 @@ class OutboxEventRepository(
                         "actor" to actor
                     )
                 )
-                insertOutboxEvent(connection, "AUDIT", UUID.randomUUID(), auditEvent)
+                insertOutboxEvent(connection, "AUDIT", aggregateId, auditEvent)
             }
         }
     }

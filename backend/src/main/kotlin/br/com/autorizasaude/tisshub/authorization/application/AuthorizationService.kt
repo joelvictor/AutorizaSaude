@@ -69,6 +69,9 @@ class AuthorizationService(
 
         if (existing != null) {
             if (existing.requestHash != requestHash) {
+                if (existing.authorizationId == null) {
+                    throw IdempotencyInProgressException()
+                }
                 idempotencyConflictEventPublisher.publish(
                     tenantId = command.tenantId,
                     correlationId = command.correlationId,
@@ -534,10 +537,8 @@ class AuthorizationService(
     @Transactional
     fun cancel(command: CancelAuthorizationCommand): Authorization? {
         val current = authorizationRepository.findById(command.tenantId, command.authorizationId) ?: return null
-        if (current.status == AuthorizationStatus.AUTHORIZED ||
-            current.status == AuthorizationStatus.DENIED ||
-            current.status == AuthorizationStatus.EXPIRED
-        ) {
+        val cancellableStatuses = setOf(AuthorizationStatus.DISPATCHED, AuthorizationStatus.PENDING_OPERATOR)
+        if (!cancellableStatuses.contains(current.status)) {
             throw CancellationNotAllowedException()
         }
         val cancelled = current.copy(

@@ -16,7 +16,7 @@ class IdempotencyConflictEventPublisher(
         tenantId: UUID,
         correlationId: UUID,
         idempotencyKey: String,
-        authorizationId: UUID?
+        authorizationId: UUID
     ) {
         outboxEventRepository.append(
             aggregateType = "IDEMPOTENCY",

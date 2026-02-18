@@ -43,9 +43,11 @@ class AuditTrailIntegrationTest {
 
         val auditTrailCount = countAuditRows(tenantUuid, authorizationUuid)
         val evt016Count = countEvt016Rows(tenantUuid)
+        val correlatedEvt016Count = countCorrelatedEvt016Rows(tenantUuid, authorizationUuid)
 
         assertEquals(6, auditTrailCount)
         assertTrue(evt016Count >= 6)
+        assertTrue(correlatedEvt016Count >= 6)
     }
 
     private fun countAuditRows(tenantId: UUID, authorizationId: UUID): Int {
@@ -77,6 +79,28 @@ class AuditTrailIntegrationTest {
                 """.trimIndent()
             ).use { statement ->
                 statement.setObject(1, tenantId)
+                statement.executeQuery().use { resultSet ->
+                    resultSet.next()
+                    return resultSet.getInt("total")
+                }
+            }
+        }
+    }
+
+    private fun countCorrelatedEvt016Rows(tenantId: UUID, authorizationId: UUID): Int {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                select count(*) as total
+                from outbox_events
+                where tenant_id = ?
+                  and aggregate_type = 'AUDIT'
+                  and event_type = 'EVT-016'
+                  and aggregate_id = ?
+                """.trimIndent()
+            ).use { statement ->
+                statement.setObject(1, tenantId)
+                statement.setObject(2, authorizationId)
                 statement.executeQuery().use { resultSet ->
                     resultSet.next()
                     return resultSet.getInt("total")
