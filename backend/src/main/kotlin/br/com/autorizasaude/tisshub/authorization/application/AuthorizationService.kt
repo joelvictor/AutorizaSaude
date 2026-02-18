@@ -6,6 +6,7 @@ import br.com.autorizasaude.tisshub.authorization.infrastructure.AuthorizationRe
 import br.com.autorizasaude.tisshub.authorization.infrastructure.IdempotencyRepository
 import br.com.autorizasaude.tisshub.authorization.infrastructure.OutboxEventRepository
 import br.com.autorizasaude.tisshub.operatordispatch.application.ExternalAuthorizationStatus
+import br.com.autorizasaude.tisshub.operatordispatch.application.PollDispatchBlockedException
 import br.com.autorizasaude.tisshub.operatordispatch.application.OperatorDispatchService
 import br.com.autorizasaude.tisshub.operatordispatch.application.PollDispatchFailedException
 import br.com.autorizasaude.tisshub.operatordispatch.domain.TechnicalStatus
@@ -346,6 +347,8 @@ class AuthorizationService(
 
         val pollResult = try {
             operatorDispatchService.pollDispatch(dispatch)
+        } catch (_: PollDispatchBlockedException) {
+            return current
         } catch (ex: PollDispatchFailedException) {
             val failedDispatch = ex.failedDispatch
             outboxEventRepository.append(

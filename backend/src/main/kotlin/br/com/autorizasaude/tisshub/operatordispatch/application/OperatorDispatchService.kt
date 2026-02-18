@@ -7,6 +7,7 @@ import br.com.autorizasaude.tisshub.operatordispatch.domain.TechnicalStatus
 import br.com.autorizasaude.tisshub.operatordispatch.infrastructure.OperatorDispatchRepository
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Instance
+import org.eclipse.microprofile.config.ConfigProvider
 import java.text.Normalizer
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -16,6 +17,10 @@ class PollDispatchFailedException(
     val movedToDeadLetter: Boolean,
     cause: Throwable
 ) : RuntimeException("Operator polling failed", cause)
+
+class PollDispatchBlockedException(
+    val nextAttemptAt: OffsetDateTime
+) : RuntimeException("Polling is blocked until scheduled retry time")
 
 @ApplicationScoped
 class OperatorDispatchService(
@@ -90,6 +95,11 @@ class OperatorDispatchService(
         repository.findLatestByAuthorization(tenantId, authorizationId)
 
     fun pollDispatch(dispatch: OperatorDispatch): OperatorAdapterPollResult {
+        val nextAttemptAt = dispatch.nextAttemptAt
+        if (nextAttemptAt != null && OffsetDateTime.now().isBefore(nextAttemptAt)) {
+            throw PollDispatchBlockedException(nextAttemptAt)
+        }
+
         return try {
             val adapter = adapters.iterator().asSequence().firstOrNull { it.dispatchType == dispatch.dispatchType }
                 ?: throw IllegalStateException("No adapter available for dispatch type ${dispatch.dispatchType.name}")
@@ -117,7 +127,7 @@ class OperatorDispatchService(
             pollResult
         } catch (ex: Exception) {
             val nextAttemptCount = dispatch.attemptCount + 1
-            val movedToDeadLetter = nextAttemptCount >= MAX_ATTEMPTS
+            val movedToDeadLetter = nextAttemptCount >= maxAttempts()
             val nextAttemptAt = if (movedToDeadLetter) {
                 null
             } else {
@@ -141,8 +151,28 @@ class OperatorDispatchService(
     }
 
     private fun resolveBackoffSeconds(nextAttemptCount: Int): Long {
-        val index = (nextAttemptCount - 2).coerceIn(0, RETRY_BACKOFF_SECONDS.lastIndex)
-        return RETRY_BACKOFF_SECONDS[index]
+        val backoffSeconds = retryBackoffSeconds()
+        val index = (nextAttemptCount - 2).coerceIn(0, backoffSeconds.lastIndex)
+        return backoffSeconds[index]
+    }
+
+    private fun maxAttempts(): Int {
+        return ConfigProvider.getConfig()
+            .getOptionalValue("tisshub.dispatch.max-attempts", Int::class.java)
+            .orElse(DEFAULT_MAX_ATTEMPTS)
+    }
+
+    private fun retryBackoffSeconds(): List<Long> {
+        val raw = ConfigProvider.getConfig()
+            .getOptionalValue("tisshub.dispatch.retry-backoff-seconds", String::class.java)
+            .orElse("")
+        if (raw.isBlank()) {
+            return DEFAULT_RETRY_BACKOFF_SECONDS
+        }
+        val parsed = raw.split(",")
+            .mapNotNull { token -> token.trim().toLongOrNull() }
+            .filter { it >= 0L }
+        return if (parsed.isEmpty()) DEFAULT_RETRY_BACKOFF_SECONDS else parsed
     }
 
     private fun resolveDispatchType(operatorCode: String): DispatchType {
@@ -166,8 +196,8 @@ class OperatorDispatchService(
     }
 
     private companion object {
-        private const val MAX_ATTEMPTS = 5
-        private val RETRY_BACKOFF_SECONDS = listOf(5L, 15L, 45L, 120L, 300L)
+        private const val DEFAULT_MAX_ATTEMPTS = 5
+        private val DEFAULT_RETRY_BACKOFF_SECONDS = listOf(5L, 15L, 45L, 120L, 300L)
 
         val TYPE_A_CODES = setOf(
             "BRADESCO",
