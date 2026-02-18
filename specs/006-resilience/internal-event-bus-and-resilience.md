@@ -35,8 +35,12 @@
 
 - Worker interno processa eventos pendentes de `outbox_events`.
 - Publicacao bem-sucedida marca `published_at`.
-- Falhas incrementam `publish_attempts` e registram `last_error`.
+- Falhas incrementam `publish_attempts`, registram `last_error` e agendam `next_attempt_at`.
+- Retry so ocorre quando `next_attempt_at` vence (quando presente).
+- Backoff configuravel (default): `5s`, `15s`, `45s`, `120s`, `300s`.
 - Ao atingir limite de tentativas, evento recebe `dead_letter_at` e espelha em `outbox_dead_letters`.
 - Operacao manual disponivel via API:
   - `GET /v1/operations/outbox`
   - `POST /v1/operations/outbox/process`
+  - `GET /v1/operations/outbox/dead-letters`
+  - `POST /v1/operations/outbox/dead-letters/requeue`
