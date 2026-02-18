@@ -19,7 +19,8 @@ data class OutboxPendingEvent(
     val tenantId: UUID,
     val eventType: String,
     val payload: String,
-    val publishAttempts: Int
+    val publishAttempts: Int,
+    val nextAttemptAt: OffsetDateTime?
 )
 
 data class OutboxProcessingStats(
@@ -105,7 +106,7 @@ class OutboxEventRepository(
                     val updated = connection.prepareStatement(
                         """
                         update outbox_events
-                        set dead_letter_at = null, publish_attempts = 0, last_error = null, published_at = null
+                        set dead_letter_at = null, publish_attempts = 0, last_error = null, published_at = null, next_attempt_at = null
                         where id = ?
                           and tenant_id = ?
                           and dead_letter_at is not null
@@ -298,14 +299,16 @@ class OutboxEventRepository(
         dataSource.connection.use { connection ->
             connection.prepareStatement(
                 """
-                select id, event_id, tenant_id, event_type, payload, publish_attempts
+                select id, event_id, tenant_id, event_type, payload, publish_attempts, next_attempt_at
                 from outbox_events
                 where published_at is null and dead_letter_at is null
+                  and (next_attempt_at is null or next_attempt_at <= ?)
                 order by occurred_at asc
                 limit ?
                 """.trimIndent()
             ).use { statement ->
-                statement.setInt(1, limit)
+                statement.setObject(1, OffsetDateTime.now())
+                statement.setInt(2, limit)
                 statement.executeQuery().use { resultSet ->
                     val events = mutableListOf<OutboxPendingEvent>()
                     while (resultSet.next()) {
@@ -315,7 +318,8 @@ class OutboxEventRepository(
                             tenantId = resultSet.getObject("tenant_id", UUID::class.java),
                             eventType = resultSet.getString("event_type"),
                             payload = resultSet.getString("payload"),
-                            publishAttempts = resultSet.getInt("publish_attempts")
+                            publishAttempts = resultSet.getInt("publish_attempts"),
+                            nextAttemptAt = resultSet.getObject("next_attempt_at", OffsetDateTime::class.java)
                         )
                     }
                     return events
@@ -329,7 +333,7 @@ class OutboxEventRepository(
             connection.prepareStatement(
                 """
                 update outbox_events
-                set published_at = ?, last_error = null
+                set published_at = ?, last_error = null, next_attempt_at = null
                 where id = ?
                 """.trimIndent()
             ).use { statement ->
@@ -340,23 +344,30 @@ class OutboxEventRepository(
         }
     }
 
-    fun markFailure(event: OutboxPendingEvent, reason: String, maxAttempts: Int): Boolean {
+    fun markFailure(
+        event: OutboxPendingEvent,
+        reason: String,
+        maxAttempts: Int,
+        nextAttemptAt: OffsetDateTime?
+    ): Boolean {
         dataSource.connection.use { connection ->
             connection.autoCommit = false
             try {
                 val nextAttempts = event.publishAttempts + 1
                 val movedToDeadLetter = nextAttempts >= maxAttempts
+                val failedAt = OffsetDateTime.now()
                 connection.prepareStatement(
                     """
                     update outbox_events
-                    set publish_attempts = ?, last_error = ?, dead_letter_at = ?
+                    set publish_attempts = ?, last_error = ?, dead_letter_at = ?, next_attempt_at = ?
                     where id = ?
                     """.trimIndent()
                 ).use { statement ->
                     statement.setInt(1, nextAttempts)
                     statement.setString(2, reason)
-                    statement.setObject(3, if (movedToDeadLetter) OffsetDateTime.now() else null)
-                    statement.setLong(4, event.id)
+                    statement.setObject(3, if (movedToDeadLetter) failedAt else null)
+                    statement.setObject(4, if (movedToDeadLetter) null else nextAttemptAt)
+                    statement.setLong(5, event.id)
                     statement.executeUpdate()
                 }
 

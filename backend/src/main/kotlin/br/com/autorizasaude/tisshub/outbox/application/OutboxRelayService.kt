@@ -5,8 +5,10 @@ import br.com.autorizasaude.tisshub.authorization.infrastructure.OutboxDeadLette
 import br.com.autorizasaude.tisshub.authorization.infrastructure.OutboxProcessingStats
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.OffsetDateTime
 import java.util.UUID
+import java.util.Optional
 
 data class OutboxRelayResult(
     val scanned: Int,
@@ -22,8 +24,12 @@ data class OutboxDeadLetterRequeueResult(
 @ApplicationScoped
 class OutboxRelayService(
     private val outboxEventRepository: OutboxEventRepository,
-    private val outboxPublisher: OutboxPublisher
+    private val outboxPublisher: OutboxPublisher,
+    @param:ConfigProperty(name = "tisshub.outbox.retry-delays-seconds")
+    private val retryDelaysRaw: Optional<String>
 ) {
+    private val retryDelaysSeconds = parseRetryDelays(retryDelaysRaw.orElse(DEFAULT_RETRY_DELAYS_SECONDS))
+
     @Scheduled(every = "{tisshub.outbox.interval}")
     fun scheduledRelay() {
         processPending()
@@ -31,7 +37,8 @@ class OutboxRelayService(
 
     fun processPending(): OutboxRelayResult {
         val batchSize = OUTBOX_BATCH_SIZE
-        val maxAttempts = OUTBOX_MAX_ATTEMPTS
+        val retryDelays = retryDelaysSeconds
+        val maxAttempts = retryDelays.size
         val pending = outboxEventRepository.findPending(batchSize)
 
         var published = 0
@@ -45,10 +52,17 @@ class OutboxRelayService(
                 published += 1
             } catch (ex: Exception) {
                 failed += 1
+                val nextAttempts = event.publishAttempts + 1
+                val nextAttemptAt = if (nextAttempts >= maxAttempts) {
+                    null
+                } else {
+                    OffsetDateTime.now().plusSeconds(retryDelays[nextAttempts - 1])
+                }
                 val moved = outboxEventRepository.markFailure(
                     event = event,
                     reason = ex.message ?: "unknown-publish-error",
-                    maxAttempts = maxAttempts
+                    maxAttempts = maxAttempts,
+                    nextAttemptAt = nextAttemptAt
                 )
                 if (moved) {
                     deadLettered += 1
@@ -79,6 +93,18 @@ class OutboxRelayService(
 
     companion object {
         private const val OUTBOX_BATCH_SIZE = 100
-        private const val OUTBOX_MAX_ATTEMPTS = 3
+        private const val DEFAULT_RETRY_DELAYS_SECONDS = "5,15,45,120,300"
+    }
+
+    private fun parseRetryDelays(raw: String): List<Long> {
+        val delays = raw.split(",")
+            .mapNotNull { it.trim().takeIf { value -> value.isNotEmpty() } }
+            .mapNotNull { it.toLongOrNull() }
+            .filter { it >= 0 }
+        return if (delays.isEmpty()) {
+            DEFAULT_RETRY_DELAYS_SECONDS.split(",").map { it.toLong() }
+        } else {
+            delays
+        }
     }
 }

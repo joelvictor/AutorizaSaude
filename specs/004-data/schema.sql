@@ -81,6 +81,7 @@ create table if not exists outbox_events (
   published_at timestamptz,
   publish_attempts integer not null default 0,
   last_error text,
+  next_attempt_at timestamptz,
   dead_letter_at timestamptz
 );
 
@@ -90,6 +91,9 @@ create index if not exists idx_outbox_unpublished
 
 create index if not exists idx_outbox_pending
   on outbox_events (occurred_at, published_at, dead_letter_at);
+
+create index if not exists idx_outbox_pending_due
+  on outbox_events (published_at, dead_letter_at, next_attempt_at, occurred_at);
 
 create table if not exists outbox_dead_letters (
   id bigserial primary key,
