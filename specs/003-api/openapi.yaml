@@ -132,6 +132,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OutboxProcessResponse'
+  /v1/operations/outbox/dead-letters:
+    get:
+      summary: Listar eventos em dead letter do tenant
+      operationId: listOutboxDeadLetters
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Eventos em dead letter para o tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxDeadLettersResponse'
+  /v1/operations/outbox/dead-letters/requeue:
+    post:
+      summary: Reprocessar manualmente eventos em dead letter do tenant
+      operationId: requeueOutboxDeadLetters
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+        - $ref: '#/components/parameters/CorrelationHeader'
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Quantidade de eventos re-enfileirados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxDeadLetterRequeueResponse'
 components:
   parameters:
     TenantHeader:
@@ -299,4 +338,32 @@ components:
         failed:
           type: integer
         deadLettered:
+          type: integer
+    OutboxDeadLettersResponse:
+      type: object
+      required: [deadLetters]
+      properties:
+        deadLetters:
+          type: array
+          items:
+            type: object
+            required: [outboxEventId, eventId, eventType, failureReason, failedAt]
+            properties:
+              outboxEventId:
+                type: integer
+              eventId:
+                type: string
+                format: uuid
+              eventType:
+                type: string
+              failureReason:
+                type: string
+              failedAt:
+                type: string
+                format: date-time
+    OutboxDeadLetterRequeueResponse:
+      type: object
+      required: [requeued]
+      properties:
+        requeued:
           type: integer

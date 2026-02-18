@@ -39,6 +39,8 @@ Endpoints iniciais:
 - `POST /v1/authorizations/{authorizationId}/poll`
 - `GET /v1/operations/outbox`
 - `POST /v1/operations/outbox/process`
+- `GET /v1/operations/outbox/dead-letters`
+- `POST /v1/operations/outbox/dead-letters/requeue`
 
 ## Frontend
 

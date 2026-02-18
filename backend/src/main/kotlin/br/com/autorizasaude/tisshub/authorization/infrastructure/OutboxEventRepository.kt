@@ -28,6 +28,14 @@ data class OutboxProcessingStats(
     val deadLetter: Long
 )
 
+data class OutboxDeadLetterEntry(
+    val outboxEventId: Long,
+    val eventId: UUID,
+    val eventType: String,
+    val failureReason: String,
+    val failedAt: OffsetDateTime
+)
+
 @ApplicationScoped
 class OutboxEventRepository(
     private val dataSource: DataSource,
@@ -37,34 +45,24 @@ class OutboxEventRepository(
         dataSource.connection.use { connection ->
             insertOutboxEvent(connection, aggregateType, aggregateId, event)
 
+            insertAuditTrail(
+                connection = connection,
+                tenantId = event.tenantId,
+                aggregateType = aggregateType,
+                aggregateId = aggregateId,
+                action = event.eventType,
+                actor = event.payload["actor"] as? String ?: "system:audit-module",
+                correlationId = event.correlationId,
+                metadata = mapOf(
+                    "eventId" to event.eventId,
+                    "eventVersion" to event.eventVersion,
+                    "occurredAt" to event.occurredAt.toString(),
+                    "payload" to event.payload
+                )
+            )
+
             if (event.eventType != "EVT-016") {
                 val actor = "system:audit-module"
-                connection.prepareStatement(
-                    """
-                    insert into audit_trail (
-                      tenant_id, aggregate_type, aggregate_id, action, actor, correlation_id, metadata
-                    ) values (?, ?, ?, ?, ?, ?, ?)
-                    """.trimIndent()
-                ).use { statement ->
-                    statement.setObject(1, event.tenantId)
-                    statement.setString(2, aggregateType)
-                    statement.setObject(3, aggregateId)
-                    statement.setString(4, event.eventType)
-                    statement.setString(5, actor)
-                    statement.setObject(6, event.correlationId)
-                    statement.setString(
-                        7,
-                        objectMapper.writeValueAsString(
-                            mapOf(
-                                "eventId" to event.eventId,
-                                "eventVersion" to event.eventVersion,
-                                "occurredAt" to event.occurredAt.toString(),
-                                "payload" to event.payload
-                            )
-                        )
-                    )
-                    statement.executeUpdate()
-                }
 
                 val auditEvent = DomainEvent(
                     eventId = UUID.randomUUID(),
@@ -81,6 +79,98 @@ class OutboxEventRepository(
                     )
                 )
                 insertOutboxEvent(connection, "AUDIT", aggregateId, auditEvent)
+            }
+        }
+    }
+
+    fun findDeadLetters(tenantId: UUID, limit: Int): List<OutboxDeadLetterEntry> {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                select outbox_event_id, event_id, event_type, failure_reason, failed_at
+                from outbox_dead_letters
+                where tenant_id = ?
+                order by failed_at desc
+                limit ?
+                """.trimIndent()
+            ).use { statement ->
+                statement.setObject(1, tenantId)
+                statement.setInt(2, limit)
+                statement.executeQuery().use { resultSet ->
+                    val entries = mutableListOf<OutboxDeadLetterEntry>()
+                    while (resultSet.next()) {
+                        entries += OutboxDeadLetterEntry(
+                            outboxEventId = resultSet.getLong("outbox_event_id"),
+                            eventId = resultSet.getObject("event_id", UUID::class.java),
+                            eventType = resultSet.getString("event_type"),
+                            failureReason = resultSet.getString("failure_reason"),
+                            failedAt = resultSet.getObject("failed_at", OffsetDateTime::class.java)
+                        )
+                    }
+                    return entries
+                }
+            }
+        }
+    }
+
+    fun requeueDeadLetters(tenantId: UUID, limit: Int): Int {
+        dataSource.connection.use { connection ->
+            connection.autoCommit = false
+            try {
+                val ids = mutableListOf<Long>()
+                connection.prepareStatement(
+                    """
+                    select outbox_event_id
+                    from outbox_dead_letters
+                    where tenant_id = ?
+                    order by failed_at asc
+                    limit ?
+                    """.trimIndent()
+                ).use { statement ->
+                    statement.setObject(1, tenantId)
+                    statement.setInt(2, limit)
+                    statement.executeQuery().use { resultSet ->
+                        while (resultSet.next()) {
+                            ids += resultSet.getLong("outbox_event_id")
+                        }
+                    }
+                }
+
+                var requeued = 0
+                ids.forEach { outboxEventId ->
+                    val updated = connection.prepareStatement(
+                        """
+                        update outbox_events
+                        set dead_letter_at = null, publish_attempts = 0, last_error = null, published_at = null
+                        where id = ? and tenant_id = ?
+                        """.trimIndent()
+                    ).use { statement ->
+                        statement.setLong(1, outboxEventId)
+                        statement.setObject(2, tenantId)
+                        statement.executeUpdate()
+                    }
+                    if (updated > 0) {
+                        connection.prepareStatement(
+                            """
+                            delete from outbox_dead_letters
+                            where outbox_event_id = ? and tenant_id = ?
+                            """.trimIndent()
+                        ).use { statement ->
+                            statement.setLong(1, outboxEventId)
+                            statement.setObject(2, tenantId)
+                            statement.executeUpdate()
+                        }
+                        requeued += 1
+                    }
+                }
+
+                connection.commit()
+                return requeued
+            } catch (ex: Exception) {
+                connection.rollback()
+                throw ex
+            } finally {
+                connection.autoCommit = true
             }
         }
     }
@@ -108,6 +198,34 @@ class OutboxEventRepository(
             statement.setObject(7, event.correlationId)
             statement.setString(8, objectMapper.writeValueAsString(event.payload))
             statement.setObject(9, event.occurredAt)
+            statement.executeUpdate()
+        }
+    }
+
+    private fun insertAuditTrail(
+        connection: java.sql.Connection,
+        tenantId: UUID,
+        aggregateType: String,
+        aggregateId: UUID,
+        action: String,
+        actor: String,
+        correlationId: UUID,
+        metadata: Map<String, Any?>
+    ) {
+        connection.prepareStatement(
+            """
+            insert into audit_trail (
+              tenant_id, aggregate_type, aggregate_id, action, actor, correlation_id, metadata
+            ) values (?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent()
+        ).use { statement ->
+            statement.setObject(1, tenantId)
+            statement.setString(2, aggregateType)
+            statement.setObject(3, aggregateId)
+            statement.setString(4, action)
+            statement.setString(5, actor)
+            statement.setObject(6, correlationId)
+            statement.setString(7, objectMapper.writeValueAsString(metadata))
             statement.executeUpdate()
         }
     }

@@ -1,16 +1,23 @@
 package br.com.autorizasaude.tisshub.outbox.application
 
 import br.com.autorizasaude.tisshub.authorization.infrastructure.OutboxEventRepository
+import br.com.autorizasaude.tisshub.authorization.infrastructure.OutboxDeadLetterEntry
 import br.com.autorizasaude.tisshub.authorization.infrastructure.OutboxProcessingStats
+import br.com.autorizasaude.tisshub.shared.events.DomainEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.OffsetDateTime
+import java.util.UUID
 
 data class OutboxRelayResult(
     val scanned: Int,
     val published: Int,
     val failed: Int,
     val deadLettered: Int
+)
+
+data class OutboxDeadLetterRequeueResult(
+    val requeued: Int
 )
 
 @ApplicationScoped
@@ -59,6 +66,38 @@ class OutboxRelayService(
     }
 
     fun stats(): OutboxProcessingStats = outboxEventRepository.stats()
+
+    fun deadLetters(tenantId: UUID, limit: Int): List<OutboxDeadLetterEntry> {
+        val safeLimit = limit.coerceIn(1, 200)
+        return outboxEventRepository.findDeadLetters(tenantId, safeLimit)
+    }
+
+    fun requeueDeadLetters(tenantId: UUID, correlationId: UUID, limit: Int): OutboxDeadLetterRequeueResult {
+        val safeLimit = limit.coerceIn(1, 200)
+        val requeued = outboxEventRepository.requeueDeadLetters(tenantId, safeLimit)
+        if (requeued > 0) {
+            outboxEventRepository.append(
+                aggregateType = "OUTBOX",
+                aggregateId = tenantId,
+                event = DomainEvent(
+                    eventId = UUID.randomUUID(),
+                    eventType = "EVT-016",
+                    eventVersion = 1,
+                    occurredAt = OffsetDateTime.now(),
+                    tenantId = tenantId,
+                    correlationId = correlationId,
+                    payload = mapOf(
+                        "aggregateType" to "OUTBOX",
+                        "aggregateId" to tenantId,
+                        "action" to "DEAD_LETTER_REQUEUED",
+                        "actor" to "system:outbox-ops",
+                        "requeued" to requeued
+                    )
+                )
+            )
+        }
+        return OutboxDeadLetterRequeueResult(requeued = requeued)
+    }
 
     companion object {
         private const val OUTBOX_BATCH_SIZE = 100
