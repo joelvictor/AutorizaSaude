@@ -171,6 +171,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OutboxDeadLetterRequeueResponse'
+  /v1/operations/observability/summary:
+    get:
+      summary: Consultar resumo de observabilidade operacional por tenant
+      operationId: getObservabilitySummary
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+      responses:
+        '200':
+          description: Metricas operacionais para dashboard
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ObservabilitySummaryResponse'
 components:
   parameters:
     TenantHeader:
@@ -367,3 +380,48 @@ components:
       properties:
         requeued:
           type: integer
+    ObservabilitySummaryResponse:
+      type: object
+      required: [latencyP95ByOperator, successRateByOperatorAndType, queues]
+      properties:
+        latencyP95ByOperator:
+          type: array
+          items:
+            type: object
+            required: [operatorCode, p95LatencyMs, samples]
+            properties:
+              operatorCode:
+                type: string
+              p95LatencyMs:
+                type: integer
+              samples:
+                type: integer
+        successRateByOperatorAndType:
+          type: array
+          items:
+            type: object
+            required: [operatorCode, dispatchType, successful, total, successRate]
+            properties:
+              operatorCode:
+                type: string
+              dispatchType:
+                type: string
+              successful:
+                type: integer
+              total:
+                type: integer
+              successRate:
+                type: number
+                format: double
+        queues:
+          type: object
+          required: [dispatchRetryQueue, dispatchDeadLetter, outboxRetryQueue, outboxDeadLetter]
+          properties:
+            dispatchRetryQueue:
+              type: integer
+            dispatchDeadLetter:
+              type: integer
+            outboxRetryQueue:
+              type: integer
+            outboxDeadLetter:
+              type: integer

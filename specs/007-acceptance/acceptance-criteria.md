@@ -25,3 +25,4 @@
 - Latencia p95 por operadora.
 - Taxa de sucesso por operadora e por tipo de integracao.
 - Fila de retries e tamanho da DLQ visiveis no dashboard.
+- Endpoint operacional por tenant disponivel em `GET /v1/operations/observability/summary`.

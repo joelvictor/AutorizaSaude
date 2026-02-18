@@ -41,6 +41,7 @@ Endpoints iniciais:
 - `POST /v1/operations/outbox/process`
 - `GET /v1/operations/outbox/dead-letters`
 - `POST /v1/operations/outbox/dead-letters/requeue`
+- `GET /v1/operations/observability/summary`
 
 ## Frontend
 
@@ -52,7 +53,10 @@ Passos:
 
 1. `cd frontend`
 2. `npm install`
-3. `npm run dev`
+3. (Opcional) configure `.env.local`:
+   - `NEXT_PUBLIC_API_BASE_URL=http://localhost:8080`
+   - `NEXT_PUBLIC_TENANT_ID=<uuid-do-tenant>`
+4. `npm run dev`
 
 ## Decisoes da Fase 1
 
