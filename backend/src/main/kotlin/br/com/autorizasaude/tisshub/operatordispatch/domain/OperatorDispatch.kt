@@ -12,6 +12,12 @@ data class OperatorDispatch(
     val technicalStatus: TechnicalStatus,
     val attemptCount: Int,
     val externalProtocol: String?,
+    val lastErrorCode: String?,
+    val lastErrorMessage: String?,
+    val nextAttemptAt: OffsetDateTime?,
+    val sentAt: OffsetDateTime?,
+    val ackAt: OffsetDateTime?,
+    val completedAt: OffsetDateTime?,
     val createdAt: OffsetDateTime,
     val updatedAt: OffsetDateTime
 )

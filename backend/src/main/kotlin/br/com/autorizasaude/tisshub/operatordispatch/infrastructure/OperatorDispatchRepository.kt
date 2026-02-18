@@ -19,8 +19,9 @@ class OperatorDispatchRepository(
                 """
                 insert into operator_dispatches (
                   dispatch_id, tenant_id, authorization_id, operator_code, dispatch_type,
-                  technical_status, attempt_count, external_protocol, created_at, updated_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  technical_status, attempt_count, external_protocol, last_error_code, last_error_message,
+                  next_attempt_at, sent_at, ack_at, completed_at, created_at, updated_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent()
             ).use { statement ->
                 statement.setObject(1, dispatch.dispatchId)
@@ -31,8 +32,14 @@ class OperatorDispatchRepository(
                 statement.setString(6, dispatch.technicalStatus.name)
                 statement.setInt(7, dispatch.attemptCount)
                 statement.setString(8, dispatch.externalProtocol)
-                statement.setObject(9, dispatch.createdAt)
-                statement.setObject(10, dispatch.updatedAt)
+                statement.setString(9, dispatch.lastErrorCode)
+                statement.setString(10, dispatch.lastErrorMessage)
+                statement.setObject(11, dispatch.nextAttemptAt)
+                statement.setObject(12, dispatch.sentAt)
+                statement.setObject(13, dispatch.ackAt)
+                statement.setObject(14, dispatch.completedAt)
+                statement.setObject(15, dispatch.createdAt)
+                statement.setObject(16, dispatch.updatedAt)
                 statement.executeUpdate()
             }
         }
@@ -43,7 +50,8 @@ class OperatorDispatchRepository(
             connection.prepareStatement(
                 """
                 select dispatch_id, tenant_id, authorization_id, operator_code, dispatch_type,
-                       technical_status, attempt_count, external_protocol, created_at, updated_at
+                       technical_status, attempt_count, external_protocol, last_error_code, last_error_message,
+                       next_attempt_at, sent_at, ack_at, completed_at, created_at, updated_at
                 from operator_dispatches
                 where tenant_id = ? and authorization_id = ?
                 order by created_at desc
@@ -67,16 +75,24 @@ class OperatorDispatchRepository(
             connection.prepareStatement(
                 """
                 update operator_dispatches
-                set technical_status = ?, attempt_count = ?, external_protocol = ?, updated_at = ?
+                set technical_status = ?, attempt_count = ?, external_protocol = ?, last_error_code = ?,
+                    last_error_message = ?, next_attempt_at = ?, sent_at = ?, ack_at = ?, completed_at = ?,
+                    updated_at = ?
                 where dispatch_id = ? and tenant_id = ?
                 """.trimIndent()
             ).use { statement ->
                 statement.setString(1, dispatch.technicalStatus.name)
                 statement.setInt(2, dispatch.attemptCount)
                 statement.setString(3, dispatch.externalProtocol)
-                statement.setObject(4, dispatch.updatedAt)
-                statement.setObject(5, dispatch.dispatchId)
-                statement.setObject(6, dispatch.tenantId)
+                statement.setString(4, dispatch.lastErrorCode)
+                statement.setString(5, dispatch.lastErrorMessage)
+                statement.setObject(6, dispatch.nextAttemptAt)
+                statement.setObject(7, dispatch.sentAt)
+                statement.setObject(8, dispatch.ackAt)
+                statement.setObject(9, dispatch.completedAt)
+                statement.setObject(10, dispatch.updatedAt)
+                statement.setObject(11, dispatch.dispatchId)
+                statement.setObject(12, dispatch.tenantId)
                 statement.executeUpdate()
             }
         }
@@ -91,6 +107,12 @@ class OperatorDispatchRepository(
         technicalStatus = TechnicalStatus.valueOf(getString("technical_status")),
         attemptCount = getInt("attempt_count"),
         externalProtocol = getString("external_protocol"),
+        lastErrorCode = getString("last_error_code"),
+        lastErrorMessage = getString("last_error_message"),
+        nextAttemptAt = getObject("next_attempt_at", OffsetDateTime::class.java),
+        sentAt = getObject("sent_at", OffsetDateTime::class.java),
+        ackAt = getObject("ack_at", OffsetDateTime::class.java),
+        completedAt = getObject("completed_at", OffsetDateTime::class.java),
         createdAt = getObject("created_at", OffsetDateTime::class.java),
         updatedAt = getObject("updated_at", OffsetDateTime::class.java)
     )
