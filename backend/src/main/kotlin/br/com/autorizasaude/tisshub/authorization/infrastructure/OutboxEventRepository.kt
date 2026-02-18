@@ -43,43 +43,7 @@ class OutboxEventRepository(
 ) {
     fun append(aggregateType: String, aggregateId: UUID, event: DomainEvent) {
         dataSource.connection.use { connection ->
-            insertOutboxEvent(connection, aggregateType, aggregateId, event)
-
-            insertAuditTrail(
-                connection = connection,
-                tenantId = event.tenantId,
-                aggregateType = aggregateType,
-                aggregateId = aggregateId,
-                action = event.eventType,
-                actor = event.payload["actor"] as? String ?: "system:audit-module",
-                correlationId = event.correlationId,
-                metadata = mapOf(
-                    "eventId" to event.eventId,
-                    "eventVersion" to event.eventVersion,
-                    "occurredAt" to event.occurredAt.toString(),
-                    "payload" to event.payload
-                )
-            )
-
-            if (event.eventType != "EVT-016") {
-                val actor = "system:audit-module"
-
-                val auditEvent = DomainEvent(
-                    eventId = UUID.randomUUID(),
-                    eventType = "EVT-016",
-                    eventVersion = 1,
-                    occurredAt = OffsetDateTime.now(),
-                    tenantId = event.tenantId,
-                    correlationId = event.correlationId,
-                    payload = mapOf(
-                        "aggregateType" to aggregateType,
-                        "aggregateId" to aggregateId,
-                        "action" to event.eventType,
-                        "actor" to actor
-                    )
-                )
-                insertOutboxEvent(connection, "AUDIT", aggregateId, auditEvent)
-            }
+            appendWithConnection(connection, aggregateType, aggregateId, event)
         }
     }
 
@@ -113,7 +77,7 @@ class OutboxEventRepository(
         }
     }
 
-    fun requeueDeadLetters(tenantId: UUID, limit: Int): Int {
+    fun requeueDeadLetters(tenantId: UUID, correlationId: UUID, limit: Int): Int {
         dataSource.connection.use { connection ->
             connection.autoCommit = false
             try {
@@ -142,13 +106,17 @@ class OutboxEventRepository(
                         """
                         update outbox_events
                         set dead_letter_at = null, publish_attempts = 0, last_error = null, published_at = null
-                        where id = ? and tenant_id = ?
+                        where id = ?
+                          and tenant_id = ?
+                          and dead_letter_at is not null
+                          and published_at is null
                         """.trimIndent()
                     ).use { statement ->
                         statement.setLong(1, outboxEventId)
                         statement.setObject(2, tenantId)
                         statement.executeUpdate()
                     }
+
                     if (updated > 0) {
                         connection.prepareStatement(
                             """
@@ -164,6 +132,29 @@ class OutboxEventRepository(
                     }
                 }
 
+                if (requeued > 0) {
+                    appendWithConnection(
+                        connection = connection,
+                        aggregateType = "OUTBOX",
+                        aggregateId = tenantId,
+                        event = DomainEvent(
+                            eventId = UUID.randomUUID(),
+                            eventType = "EVT-016",
+                            eventVersion = 1,
+                            occurredAt = OffsetDateTime.now(),
+                            tenantId = tenantId,
+                            correlationId = correlationId,
+                            payload = mapOf(
+                                "aggregateType" to "OUTBOX",
+                                "aggregateId" to tenantId,
+                                "action" to "DEAD_LETTER_REQUEUED",
+                                "actor" to "system:outbox-ops",
+                                "requeued" to requeued
+                            )
+                        )
+                    )
+                }
+
                 connection.commit()
                 return requeued
             } catch (ex: Exception) {
@@ -172,6 +163,51 @@ class OutboxEventRepository(
             } finally {
                 connection.autoCommit = true
             }
+        }
+    }
+
+    private fun appendWithConnection(
+        connection: java.sql.Connection,
+        aggregateType: String,
+        aggregateId: UUID,
+        event: DomainEvent
+    ) {
+        insertOutboxEvent(connection, aggregateType, aggregateId, event)
+
+        insertAuditTrail(
+            connection = connection,
+            tenantId = event.tenantId,
+            aggregateType = aggregateType,
+            aggregateId = aggregateId,
+            action = event.eventType,
+            actor = event.payload["actor"] as? String ?: "system:audit-module",
+            correlationId = event.correlationId,
+            metadata = mapOf(
+                "eventId" to event.eventId,
+                "eventVersion" to event.eventVersion,
+                "occurredAt" to event.occurredAt.toString(),
+                "payload" to event.payload
+            )
+        )
+
+        if (event.eventType != "EVT-016") {
+            val actor = "system:audit-module"
+
+            val auditEvent = DomainEvent(
+                eventId = UUID.randomUUID(),
+                eventType = "EVT-016",
+                eventVersion = 1,
+                occurredAt = OffsetDateTime.now(),
+                tenantId = event.tenantId,
+                correlationId = event.correlationId,
+                payload = mapOf(
+                    "aggregateType" to aggregateType,
+                    "aggregateId" to aggregateId,
+                    "action" to event.eventType,
+                    "actor" to actor
+                )
+            )
+            insertOutboxEvent(connection, "AUDIT", aggregateId, auditEvent)
         }
     }
 

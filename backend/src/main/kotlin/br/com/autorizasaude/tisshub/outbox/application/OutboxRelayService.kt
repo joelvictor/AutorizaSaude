@@ -3,7 +3,6 @@ package br.com.autorizasaude.tisshub.outbox.application
 import br.com.autorizasaude.tisshub.authorization.infrastructure.OutboxEventRepository
 import br.com.autorizasaude.tisshub.authorization.infrastructure.OutboxDeadLetterEntry
 import br.com.autorizasaude.tisshub.authorization.infrastructure.OutboxProcessingStats
-import br.com.autorizasaude.tisshub.shared.events.DomainEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.OffsetDateTime
@@ -74,28 +73,7 @@ class OutboxRelayService(
 
     fun requeueDeadLetters(tenantId: UUID, correlationId: UUID, limit: Int): OutboxDeadLetterRequeueResult {
         val safeLimit = limit.coerceIn(1, 200)
-        val requeued = outboxEventRepository.requeueDeadLetters(tenantId, safeLimit)
-        if (requeued > 0) {
-            outboxEventRepository.append(
-                aggregateType = "OUTBOX",
-                aggregateId = tenantId,
-                event = DomainEvent(
-                    eventId = UUID.randomUUID(),
-                    eventType = "EVT-016",
-                    eventVersion = 1,
-                    occurredAt = OffsetDateTime.now(),
-                    tenantId = tenantId,
-                    correlationId = correlationId,
-                    payload = mapOf(
-                        "aggregateType" to "OUTBOX",
-                        "aggregateId" to tenantId,
-                        "action" to "DEAD_LETTER_REQUEUED",
-                        "actor" to "system:outbox-ops",
-                        "requeued" to requeued
-                    )
-                )
-            )
-        }
+        val requeued = outboxEventRepository.requeueDeadLetters(tenantId, correlationId, safeLimit)
         return OutboxDeadLetterRequeueResult(requeued = requeued)
     }
 
