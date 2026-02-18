@@ -68,6 +68,33 @@ class OperatorDispatchService(
     fun findLatestDispatch(tenantId: UUID, authorizationId: UUID): OperatorDispatch? =
         repository.findLatestByAuthorization(tenantId, authorizationId)
 
+    fun pollDispatch(dispatch: OperatorDispatch): OperatorAdapterPollResult {
+        return try {
+            val adapter = adapters.iterator().asSequence().firstOrNull { it.dispatchType == dispatch.dispatchType }
+                ?: throw IllegalStateException("No adapter available for dispatch type ${dispatch.dispatchType.name}")
+            val pollResult = adapter.poll(dispatch)
+            val updated = dispatch.copy(
+                technicalStatus = when (pollResult.externalStatus) {
+                    ExternalAuthorizationStatus.PENDING -> TechnicalStatus.POLLING
+                    ExternalAuthorizationStatus.APPROVED -> TechnicalStatus.COMPLETED
+                    ExternalAuthorizationStatus.DENIED -> TechnicalStatus.COMPLETED
+                },
+                externalProtocol = pollResult.operatorReference ?: dispatch.externalProtocol,
+                updatedAt = OffsetDateTime.now()
+            )
+            repository.update(updated)
+            pollResult
+        } catch (ex: Exception) {
+            val failed = dispatch.copy(
+                technicalStatus = TechnicalStatus.TECHNICAL_ERROR,
+                attemptCount = dispatch.attemptCount + 1,
+                updatedAt = OffsetDateTime.now()
+            )
+            repository.update(failed)
+            throw ex
+        }
+    }
+
     private fun resolveDispatchType(operatorCode: String): DispatchType {
         val normalized = normalizeOperatorCode(operatorCode)
         return when {

@@ -285,7 +285,7 @@ class AuthorizationResourceTest {
             .`when`().post("/v1/authorizations")
             .then()
             .statusCode(201)
-            .body("status", equalTo("DISPATCHED"))
+            .body("status", equalTo("PENDING_OPERATOR"))
             .extract()
             .path<String>("authorizationId")
 
@@ -296,5 +296,95 @@ class AuthorizationResourceTest {
             .statusCode(200)
             .body("dispatch.dispatchType", equalTo("TYPE_B"))
             .body("dispatch.technicalStatus", equalTo("POLLING"))
+    }
+
+    @Test
+    fun `should poll type b authorization to approved`() {
+        val tenantId = UUID.randomUUID().toString()
+        val authorizationId = given()
+            .header("X-Tenant-Id", tenantId)
+            .header("X-Correlation-Id", UUID.randomUUID().toString())
+            .header("X-Idempotency-Key", "idem-${UUID.randomUUID()}")
+            .contentType("application/json")
+            .body(
+                """
+                {
+                  "patientId": "P-009",
+                  "operatorCode": "UNIMED_ANAPOLIS",
+                  "procedureCodes": ["88888888"],
+                  "clinicalJustification": "Aguardando resposta da operadora"
+                }
+                """.trimIndent()
+            )
+            .`when`().post("/v1/authorizations")
+            .then()
+            .statusCode(201)
+            .body("status", equalTo("PENDING_OPERATOR"))
+            .extract()
+            .path<String>("authorizationId")
+
+        given()
+            .header("X-Tenant-Id", tenantId)
+            .header("X-Correlation-Id", UUID.randomUUID().toString())
+            .`when`().post("/v1/authorizations/$authorizationId/poll")
+            .then()
+            .statusCode(200)
+            .body("status", equalTo("AUTHORIZED"))
+
+        given()
+            .header("X-Tenant-Id", tenantId)
+            .`when`().get("/v1/authorizations/$authorizationId/status")
+            .then()
+            .statusCode(200)
+            .body("status", equalTo("AUTHORIZED"))
+            .body("timeline.size()", equalTo(7))
+            .body("timeline[5].eventType", equalTo("EVT-008"))
+            .body("timeline[6].eventType", equalTo("EVT-009"))
+            .body("timeline[5].detail", containsString("\"externalStatus\":\"APPROVED\""))
+    }
+
+    @Test
+    fun `should poll type b authorization to denied`() {
+        val tenantId = UUID.randomUUID().toString()
+        val authorizationId = given()
+            .header("X-Tenant-Id", tenantId)
+            .header("X-Correlation-Id", UUID.randomUUID().toString())
+            .header("X-Idempotency-Key", "idem-${UUID.randomUUID()}")
+            .contentType("application/json")
+            .body(
+                """
+                {
+                  "patientId": "P-010",
+                  "operatorCode": "ALLIANZ_SAUDE",
+                  "procedureCodes": ["99999999"],
+                  "clinicalJustification": "Fluxo de negativa"
+                }
+                """.trimIndent()
+            )
+            .`when`().post("/v1/authorizations")
+            .then()
+            .statusCode(201)
+            .body("status", equalTo("PENDING_OPERATOR"))
+            .extract()
+            .path<String>("authorizationId")
+
+        given()
+            .header("X-Tenant-Id", tenantId)
+            .header("X-Correlation-Id", UUID.randomUUID().toString())
+            .`when`().post("/v1/authorizations/$authorizationId/poll")
+            .then()
+            .statusCode(200)
+            .body("status", equalTo("DENIED"))
+
+        given()
+            .header("X-Tenant-Id", tenantId)
+            .`when`().get("/v1/authorizations/$authorizationId/status")
+            .then()
+            .statusCode(200)
+            .body("status", equalTo("DENIED"))
+            .body("timeline.size()", equalTo(7))
+            .body("timeline[5].eventType", equalTo("EVT-008"))
+            .body("timeline[6].eventType", equalTo("EVT-010"))
+            .body("timeline[5].detail", containsString("\"externalStatus\":\"DENIED\""))
     }
 }

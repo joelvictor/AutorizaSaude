@@ -6,6 +6,7 @@ import br.com.autorizasaude.tisshub.authorization.application.CancelAuthorizatio
 import br.com.autorizasaude.tisshub.authorization.application.CreateAuthorizationCommand
 import br.com.autorizasaude.tisshub.authorization.application.IdempotencyConflictException
 import br.com.autorizasaude.tisshub.authorization.application.IdempotencyInProgressException
+import br.com.autorizasaude.tisshub.authorization.application.PollAuthorizationStatusCommand
 import br.com.autorizasaude.tisshub.authorization.domain.Authorization
 import br.com.autorizasaude.tisshub.authorization.domain.AuthorizationStatus
 import jakarta.ws.rs.Consumes
@@ -171,6 +172,26 @@ class AuthorizationResource(
                 correlationId = correlationId,
                 authorizationId = authorizationId,
                 reason = request.reason.trim()
+            )
+        ) ?: throw NotFoundException()
+        return AuthorizationResponse.from(authorization)
+    }
+
+    @POST
+    @Path("/{authorizationId}/poll")
+    @Consumes(MediaType.WILDCARD)
+    fun poll(
+        @HeaderParam("X-Tenant-Id") tenantIdHeader: String?,
+        @HeaderParam("X-Correlation-Id") correlationIdHeader: String?,
+        @PathParam("authorizationId") authorizationId: UUID
+    ): AuthorizationResponse {
+        val tenantId = parseRequiredUuidHeader("X-Tenant-Id", tenantIdHeader)
+        val correlationId = parseRequiredUuidHeader("X-Correlation-Id", correlationIdHeader)
+        val authorization = authorizationService.pollStatus(
+            PollAuthorizationStatusCommand(
+                tenantId = tenantId,
+                correlationId = correlationId,
+                authorizationId = authorizationId
             )
         ) ?: throw NotFoundException()
         return AuthorizationResponse.from(authorization)

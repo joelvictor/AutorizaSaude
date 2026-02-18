@@ -1,7 +1,9 @@
 package br.com.autorizasaude.tisshub.operatordispatch.integration
 
 import br.com.autorizasaude.tisshub.operatordispatch.application.OperatorAdapter
+import br.com.autorizasaude.tisshub.operatordispatch.application.OperatorAdapterPollResult
 import br.com.autorizasaude.tisshub.operatordispatch.application.OperatorAdapterSendResult
+import br.com.autorizasaude.tisshub.operatordispatch.application.ExternalAuthorizationStatus
 import br.com.autorizasaude.tisshub.operatordispatch.domain.DispatchType
 import br.com.autorizasaude.tisshub.operatordispatch.domain.OperatorDispatch
 import br.com.autorizasaude.tisshub.operatordispatch.domain.TechnicalStatus
@@ -15,6 +17,15 @@ class TypeCOperatorAdapter : OperatorAdapter {
         return OperatorAdapterSendResult(
             technicalStatus = TechnicalStatus.SENT,
             externalProtocol = null
+        )
+    }
+
+    override fun poll(dispatch: OperatorDispatch): OperatorAdapterPollResult {
+        return OperatorAdapterPollResult(
+            externalStatus = ExternalAuthorizationStatus.PENDING,
+            operatorReference = dispatch.externalProtocol,
+            denialReasonCode = null,
+            denialReason = null
         )
     }
 }

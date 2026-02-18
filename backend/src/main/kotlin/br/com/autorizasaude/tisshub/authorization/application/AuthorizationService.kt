@@ -5,6 +5,7 @@ import br.com.autorizasaude.tisshub.authorization.domain.AuthorizationStatus
 import br.com.autorizasaude.tisshub.authorization.infrastructure.AuthorizationRepository
 import br.com.autorizasaude.tisshub.authorization.infrastructure.IdempotencyRepository
 import br.com.autorizasaude.tisshub.authorization.infrastructure.OutboxEventRepository
+import br.com.autorizasaude.tisshub.operatordispatch.application.ExternalAuthorizationStatus
 import br.com.autorizasaude.tisshub.operatordispatch.application.OperatorDispatchService
 import br.com.autorizasaude.tisshub.operatordispatch.domain.TechnicalStatus
 import br.com.autorizasaude.tisshub.shared.events.DomainEvent
@@ -32,6 +33,12 @@ data class CancelAuthorizationCommand(
     val correlationId: UUID,
     val authorizationId: UUID,
     val reason: String
+)
+
+data class PollAuthorizationStatusCommand(
+    val tenantId: UUID,
+    val correlationId: UUID,
+    val authorizationId: UUID
 )
 
 data class CreateAuthorizationResult(
@@ -296,7 +303,11 @@ class AuthorizationService(
         }
 
         val dispatched = validated.copy(
-            status = AuthorizationStatus.DISPATCHED,
+            status = if (dispatch.technicalStatus == TechnicalStatus.POLLING) {
+                AuthorizationStatus.PENDING_OPERATOR
+            } else {
+                AuthorizationStatus.DISPATCHED
+            },
             updatedAt = OffsetDateTime.now()
         )
         authorizationRepository.updateStatus(dispatched)
@@ -316,6 +327,137 @@ class AuthorizationService(
     }
 
     fun getById(tenantId: UUID, id: UUID): Authorization? = authorizationRepository.findById(tenantId, id)
+
+    @Transactional
+    fun pollStatus(command: PollAuthorizationStatusCommand): Authorization? {
+        val current = authorizationRepository.findById(command.tenantId, command.authorizationId) ?: return null
+        if (current.status == AuthorizationStatus.AUTHORIZED ||
+            current.status == AuthorizationStatus.DENIED ||
+            current.status == AuthorizationStatus.CANCELLED ||
+            current.status == AuthorizationStatus.EXPIRED ||
+            current.status == AuthorizationStatus.FAILED_TECHNICAL
+        ) {
+            return current
+        }
+
+        val dispatch = operatorDispatchService.findLatestDispatch(command.tenantId, command.authorizationId)
+            ?: return current
+
+        val pollResult = try {
+            operatorDispatchService.pollDispatch(dispatch)
+        } catch (ex: Exception) {
+            val failed = current.copy(
+                status = AuthorizationStatus.FAILED_TECHNICAL,
+                updatedAt = OffsetDateTime.now()
+            )
+            authorizationRepository.updateStatus(failed)
+            outboxEventRepository.append(
+                aggregateType = "AUTHORIZATION",
+                aggregateId = failed.authorizationId,
+                event = DomainEvent(
+                    eventId = UUID.randomUUID(),
+                    eventType = "EVT-013",
+                    eventVersion = 1,
+                    occurredAt = failed.updatedAt,
+                    tenantId = failed.tenantId,
+                    correlationId = command.correlationId,
+                    payload = mapOf(
+                        "authorizationId" to failed.authorizationId,
+                        "dispatchId" to dispatch.dispatchId,
+                        "errorCode" to "POLL_ERROR",
+                        "errorMessage" to (ex.message ?: "Operator polling failed")
+                    )
+                )
+            )
+            return failed
+        }
+
+        outboxEventRepository.append(
+            aggregateType = "AUTHORIZATION",
+            aggregateId = current.authorizationId,
+            event = DomainEvent(
+                eventId = UUID.randomUUID(),
+                eventType = "EVT-008",
+                eventVersion = 1,
+                occurredAt = OffsetDateTime.now(),
+                tenantId = current.tenantId,
+                correlationId = command.correlationId,
+                payload = mapOf(
+                    "authorizationId" to current.authorizationId,
+                    "dispatchId" to dispatch.dispatchId,
+                    "externalStatus" to pollResult.externalStatus.name
+                )
+            )
+        )
+
+        return when (pollResult.externalStatus) {
+            ExternalAuthorizationStatus.PENDING -> {
+                if (current.status == AuthorizationStatus.PENDING_OPERATOR) {
+                    current
+                } else {
+                    val pending = current.copy(
+                        status = AuthorizationStatus.PENDING_OPERATOR,
+                        updatedAt = OffsetDateTime.now()
+                    )
+                    authorizationRepository.updateStatus(pending)
+                    pending
+                }
+            }
+
+            ExternalAuthorizationStatus.APPROVED -> {
+                val approved = current.copy(
+                    status = AuthorizationStatus.AUTHORIZED,
+                    updatedAt = OffsetDateTime.now()
+                )
+                authorizationRepository.updateStatus(approved)
+                outboxEventRepository.append(
+                    aggregateType = "AUTHORIZATION",
+                    aggregateId = approved.authorizationId,
+                    event = DomainEvent(
+                        eventId = UUID.randomUUID(),
+                        eventType = "EVT-009",
+                        eventVersion = 1,
+                        occurredAt = approved.updatedAt,
+                        tenantId = approved.tenantId,
+                        correlationId = command.correlationId,
+                        payload = mapOf(
+                            "authorizationId" to approved.authorizationId,
+                            "authorizedAt" to approved.updatedAt.toString(),
+                            "operatorReference" to pollResult.operatorReference
+                        )
+                    )
+                )
+                approved
+            }
+
+            ExternalAuthorizationStatus.DENIED -> {
+                val denied = current.copy(
+                    status = AuthorizationStatus.DENIED,
+                    updatedAt = OffsetDateTime.now()
+                )
+                authorizationRepository.updateStatus(denied)
+                outboxEventRepository.append(
+                    aggregateType = "AUTHORIZATION",
+                    aggregateId = denied.authorizationId,
+                    event = DomainEvent(
+                        eventId = UUID.randomUUID(),
+                        eventType = "EVT-010",
+                        eventVersion = 1,
+                        occurredAt = denied.updatedAt,
+                        tenantId = denied.tenantId,
+                        correlationId = command.correlationId,
+                        payload = mapOf(
+                            "authorizationId" to denied.authorizationId,
+                            "deniedAt" to denied.updatedAt.toString(),
+                            "denialReasonCode" to (pollResult.denialReasonCode ?: "UNSPECIFIED"),
+                            "denialReason" to (pollResult.denialReason ?: "Denied by operator")
+                        )
+                    )
+                )
+                denied
+            }
+        }
+    }
 
     @Transactional
     fun cancel(command: CancelAuthorizationCommand): Authorization? {
