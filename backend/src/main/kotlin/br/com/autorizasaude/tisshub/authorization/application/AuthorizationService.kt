@@ -7,6 +7,7 @@ import br.com.autorizasaude.tisshub.authorization.infrastructure.IdempotencyRepo
 import br.com.autorizasaude.tisshub.authorization.infrastructure.OutboxEventRepository
 import br.com.autorizasaude.tisshub.operatordispatch.application.ExternalAuthorizationStatus
 import br.com.autorizasaude.tisshub.operatordispatch.application.OperatorDispatchService
+import br.com.autorizasaude.tisshub.operatordispatch.application.PollDispatchFailedException
 import br.com.autorizasaude.tisshub.operatordispatch.domain.TechnicalStatus
 import br.com.autorizasaude.tisshub.shared.events.DomainEvent
 import br.com.autorizasaude.tisshub.tissguide.application.TissGuideService
@@ -345,6 +346,82 @@ class AuthorizationService(
 
         val pollResult = try {
             operatorDispatchService.pollDispatch(dispatch)
+        } catch (ex: PollDispatchFailedException) {
+            val failedDispatch = ex.failedDispatch
+            outboxEventRepository.append(
+                aggregateType = "AUTHORIZATION",
+                aggregateId = current.authorizationId,
+                event = DomainEvent(
+                    eventId = UUID.randomUUID(),
+                    eventType = "EVT-013",
+                    eventVersion = 1,
+                    occurredAt = failedDispatch.updatedAt,
+                    tenantId = current.tenantId,
+                    correlationId = command.correlationId,
+                    payload = mapOf(
+                        "authorizationId" to current.authorizationId,
+                        "dispatchId" to failedDispatch.dispatchId,
+                        "errorCode" to (failedDispatch.lastErrorCode ?: "POLL_ERROR"),
+                        "errorMessage" to (failedDispatch.lastErrorMessage ?: "Operator polling failed")
+                    )
+                )
+            )
+
+            if (ex.movedToDeadLetter) {
+                val failed = current.copy(
+                    status = AuthorizationStatus.FAILED_TECHNICAL,
+                    updatedAt = OffsetDateTime.now()
+                )
+                authorizationRepository.updateStatus(failed)
+                outboxEventRepository.append(
+                    aggregateType = "AUTHORIZATION",
+                    aggregateId = failed.authorizationId,
+                    event = DomainEvent(
+                        eventId = UUID.randomUUID(),
+                        eventType = "EVT-014",
+                        eventVersion = 1,
+                        occurredAt = failed.updatedAt,
+                        tenantId = failed.tenantId,
+                        correlationId = command.correlationId,
+                        payload = mapOf(
+                            "authorizationId" to failed.authorizationId,
+                            "dispatchId" to failedDispatch.dispatchId,
+                            "attempts" to failedDispatch.attemptCount,
+                            "lastErrorCode" to (failedDispatch.lastErrorCode ?: "POLL_ERROR")
+                        )
+                    )
+                )
+                return failed
+            }
+
+            outboxEventRepository.append(
+                aggregateType = "AUTHORIZATION",
+                aggregateId = current.authorizationId,
+                event = DomainEvent(
+                    eventId = UUID.randomUUID(),
+                    eventType = "EVT-012",
+                    eventVersion = 1,
+                    occurredAt = OffsetDateTime.now(),
+                    tenantId = current.tenantId,
+                    correlationId = command.correlationId,
+                    payload = mapOf(
+                        "authorizationId" to current.authorizationId,
+                        "dispatchId" to failedDispatch.dispatchId,
+                        "nextAttemptAt" to (failedDispatch.nextAttemptAt?.toString() ?: OffsetDateTime.now().toString())
+                    )
+                )
+            )
+
+            return if (current.status == AuthorizationStatus.PENDING_OPERATOR) {
+                current
+            } else {
+                val pending = current.copy(
+                    status = AuthorizationStatus.PENDING_OPERATOR,
+                    updatedAt = OffsetDateTime.now()
+                )
+                authorizationRepository.updateStatus(pending)
+                pending
+            }
         } catch (ex: Exception) {
             val failed = current.copy(
                 status = AuthorizationStatus.FAILED_TECHNICAL,
