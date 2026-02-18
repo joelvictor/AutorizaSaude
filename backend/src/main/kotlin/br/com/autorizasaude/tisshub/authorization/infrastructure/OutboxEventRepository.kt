@@ -35,25 +35,80 @@ class OutboxEventRepository(
 ) {
     fun append(aggregateType: String, aggregateId: UUID, event: DomainEvent) {
         dataSource.connection.use { connection ->
-            connection.prepareStatement(
-                """
-                insert into outbox_events (
-                  event_id, tenant_id, aggregate_type, aggregate_id,
-                  event_type, event_version, correlation_id, payload, occurred_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """.trimIndent()
-            ).use { statement ->
-                statement.setObject(1, event.eventId)
-                statement.setObject(2, event.tenantId)
-                statement.setString(3, aggregateType)
-                statement.setObject(4, aggregateId)
-                statement.setString(5, event.eventType)
-                statement.setInt(6, event.eventVersion)
-                statement.setObject(7, event.correlationId)
-                statement.setString(8, objectMapper.writeValueAsString(event.payload))
-                statement.setObject(9, event.occurredAt)
-                statement.executeUpdate()
+            insertOutboxEvent(connection, aggregateType, aggregateId, event)
+
+            if (event.eventType != "EVT-016") {
+                val actor = "system:audit-module"
+                connection.prepareStatement(
+                    """
+                    insert into audit_trail (
+                      tenant_id, aggregate_type, aggregate_id, action, actor, correlation_id, metadata
+                    ) values (?, ?, ?, ?, ?, ?, ?)
+                    """.trimIndent()
+                ).use { statement ->
+                    statement.setObject(1, event.tenantId)
+                    statement.setString(2, aggregateType)
+                    statement.setObject(3, aggregateId)
+                    statement.setString(4, event.eventType)
+                    statement.setString(5, actor)
+                    statement.setObject(6, event.correlationId)
+                    statement.setString(
+                        7,
+                        objectMapper.writeValueAsString(
+                            mapOf(
+                                "eventId" to event.eventId,
+                                "eventVersion" to event.eventVersion,
+                                "occurredAt" to event.occurredAt.toString(),
+                                "payload" to event.payload
+                            )
+                        )
+                    )
+                    statement.executeUpdate()
+                }
+
+                val auditEvent = DomainEvent(
+                    eventId = UUID.randomUUID(),
+                    eventType = "EVT-016",
+                    eventVersion = 1,
+                    occurredAt = OffsetDateTime.now(),
+                    tenantId = event.tenantId,
+                    correlationId = event.correlationId,
+                    payload = mapOf(
+                        "aggregateType" to aggregateType,
+                        "aggregateId" to aggregateId,
+                        "action" to event.eventType,
+                        "actor" to actor
+                    )
+                )
+                insertOutboxEvent(connection, "AUDIT", UUID.randomUUID(), auditEvent)
             }
+        }
+    }
+
+    private fun insertOutboxEvent(
+        connection: java.sql.Connection,
+        aggregateType: String,
+        aggregateId: UUID,
+        event: DomainEvent
+    ) {
+        connection.prepareStatement(
+            """
+            insert into outbox_events (
+              event_id, tenant_id, aggregate_type, aggregate_id,
+              event_type, event_version, correlation_id, payload, occurred_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent()
+        ).use { statement ->
+            statement.setObject(1, event.eventId)
+            statement.setObject(2, event.tenantId)
+            statement.setString(3, aggregateType)
+            statement.setObject(4, aggregateId)
+            statement.setString(5, event.eventType)
+            statement.setInt(6, event.eventVersion)
+            statement.setObject(7, event.correlationId)
+            statement.setString(8, objectMapper.writeValueAsString(event.payload))
+            statement.setObject(9, event.occurredAt)
+            statement.executeUpdate()
         }
     }
 
